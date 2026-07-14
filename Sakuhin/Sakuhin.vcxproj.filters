@@ -1,17 +1,76 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <Filter Include="ソース ファイル">
-      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
-      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    <ClCompile Include="Source\Main.cpp" />
+    <ClCompile Include="Source\Player\PlayerManager.cpp">
+      <Filter>Player</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Player\AnimationController.cpp">
+      <Filter>Animation</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Input\Input.cpp">
+      <Filter>Input</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Player\PlayerAttack.cpp">
+      <Filter>Player\PlayerAttack</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\MyMath\MyMath.cpp">
+      <Filter>MyMath</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Camera\Camera.cpp">
+      <Filter>Camera</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Player\Player.cpp">
+      <Filter>Player</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Player">
+      <UniqueIdentifier>{cc2dea95-3762-4ec9-a053-d2dea7bc7c33}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ヘッダー ファイル">
-      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
-      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    <Filter Include="Input">
+      <UniqueIdentifier>{918b5cef-8842-42b4-83a1-5daed51b3f2b}</UniqueIdentifier>
     </Filter>
-    <Filter Include="リソース ファイル">
-      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
-      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    <Filter Include="Player\PlayerAttack">
+      <UniqueIdentifier>{6364bf63-b435-4c8e-97b0-9b36d38a2202}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Animation">
+      <UniqueIdentifier>{92220128-e716-47c7-8130-4c92aa035d82}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="GameSetting">
+      <UniqueIdentifier>{fa3c88ad-6bf3-4782-8faa-d9d43d690e5d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="MyMath">
+      <UniqueIdentifier>{7929e539-3a82-4f79-943c-210e030ddd6c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Camera">
+      <UniqueIdentifier>{563e7633-4f0f-423b-b61f-3756c4f3e4bf}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Source\Player\Player.h">
+      <Filter>Player</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Player\PlayerManager.h">
+      <Filter>Player</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Player\AnimationController.h">
+      <Filter>Animation</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Input\Input.h">
+      <Filter>Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Player\PlayerAttack.h">
+      <Filter>Player\PlayerAttack</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\GameSetting\GameSetting.h">
+      <Filter>GameSetting</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\MyMath\MyMath.h">
+      <Filter>MyMath</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Camera\Camera.h">
+      <Filter>Camera</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
