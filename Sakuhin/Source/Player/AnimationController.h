@@ -9,7 +9,7 @@ public:
 
     void Initialize(int modelHandle);
     void Update();
-    bool PlayAnimation(int animIndex, float speed = 1.0f, bool loop = true);
+    bool PlayAnimation(int animIndex, float speed = 1.0f, bool loop = true, float startTime = 0.0f, float endTime = 0.0f);
     void SetCurrentTime(float time);
     void StopAnimation();
     void Finalize();
@@ -17,6 +17,7 @@ public:
     bool IsPlaying() const;
     float GetCurrentTime() const;
     float GetAnimationDuration() const;
+    int GetCurrentAnimIndex() const;
 
 private:
     int modelHandle_;
@@ -26,4 +27,6 @@ private:
     float currentTime_;
     float speed_;
     bool loop_;
+    float startTime_;
+    float endTime_;
 };

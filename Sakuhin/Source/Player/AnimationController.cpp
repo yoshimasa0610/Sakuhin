@@ -10,6 +10,8 @@ AnimationController::AnimationController()
     , currentTime_(0.0f)
     , speed_(1.0f)
     , loop_(true)
+    , startTime_(0.0f)
+    , endTime_(0.0f)
 {
 }
 
@@ -20,6 +22,8 @@ void AnimationController::Initialize(int modelHandle)
     currentAnimIndex_ = -1;
     isPlaying_ = false;
     currentTime_ = 0.0f;
+    startTime_ = 0.0f;
+    endTime_ = 0.0f;
 }
 
 void AnimationController::Update()
@@ -33,36 +37,43 @@ void AnimationController::Update()
     currentTime_ += deltaTime * speed_;
 
     const float totalTime = MV1GetAnimTotalTime(modelHandle_, currentAnimIndex_);
-    if (totalTime > 0.0f)
+    const float limit = (endTime_ > 0.0f) ? endTime_ : totalTime;
+
+    if (limit > 0.0f)
     {
         if (loop_)
         {
-            currentTime_ = fmod(currentTime_, totalTime);
+            if (currentTime_ >= limit)
+            {
+                currentTime_ = startTime_ + fmod(currentTime_ - startTime_, limit - startTime_);
+            }
         }
-        else if (currentTime_ >= totalTime)
+        else
         {
-            currentTime_ = totalTime;
-            isPlaying_ = false;
+            if (currentTime_ >= limit)
+            {
+                currentTime_ = limit;
+                isPlaying_ = false;
+
+                TCHAR debugMsg[256];
+                _stprintf_s(debugMsg, 256, _T("[AnimController] Animation finished: time=%.2f, limit=%.2f\n"), currentTime_, limit);
+                OutputDebugString(debugMsg);
+            }
         }
     }
 
     MV1SetAttachAnimTime(modelHandle_, attachmentIndex_, currentTime_);
 }
 
-bool AnimationController::PlayAnimation(int animIndex, float speed, bool loop)
+bool AnimationController::PlayAnimation(int animIndex, float speed, bool loop, float startTime, float endTime)
 {
     if (modelHandle_ < 0 || animIndex < 0)
     {
+        OutputDebugString(_T("PlayAnimation failed: modelHandle or animIndex invalid\n"));
         return false;
     }
 
-    if (isPlaying_ && currentAnimIndex_ == animIndex)
-    {
-        speed_ = speed;
-        loop_ = loop;
-        return true;
-    }
-
+    // 同じアニメーションでも開始位置が異なる場合は再アタッチが必要なので、常に再開始する
     if (attachmentIndex_ >= 0)
     {
         MV1DetachAnim(modelHandle_, attachmentIndex_);
@@ -74,15 +85,25 @@ bool AnimationController::PlayAnimation(int animIndex, float speed, bool loop)
     {
         currentAnimIndex_ = animIndex;
         isPlaying_ = true;
-        currentTime_ = 0.0f;
+        currentTime_ = startTime;
         speed_ = speed;
         loop_ = loop;
+        startTime_ = startTime;
+        endTime_ = endTime;
 
         MV1SetAttachAnimBlendRate(modelHandle_, attachmentIndex_, 1.0f);
+        MV1SetAttachAnimTime(modelHandle_, attachmentIndex_, currentTime_);
+
+        TCHAR debugMsg[256];
+        _stprintf_s(debugMsg, 256, _T("PlayAnimation Success: animIndex=%d, start=%.2f, end=%.2f\n"), animIndex, startTime, endTime);
+        OutputDebugString(debugMsg);
         return true;
     }
 
     currentAnimIndex_ = -1;
+    TCHAR debugMsg[256];
+    _stprintf_s(debugMsg, 256, _T("PlayAnimation failed: MV1AttachAnim returned -1 for animIndex=%d\n"), animIndex);
+    OutputDebugString(debugMsg);
     return false;
 }
 
@@ -154,4 +175,9 @@ float AnimationController::GetAnimationDuration() const
     }
 
     return MV1GetAnimTotalTime(modelHandle_, currentAnimIndex_);
+}
+
+int AnimationController::GetCurrentAnimIndex() const
+{
+    return currentAnimIndex_;
 }
