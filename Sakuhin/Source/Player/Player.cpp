@@ -4,11 +4,14 @@
 
 namespace
 {
-    constexpr float kModelScale = 1.0f;
+    constexpr float kModelScale = 120.0f;
     constexpr float kDefaultRotationY = 3.14159f;
     constexpr int kAttackAnimIndex = 0;
     constexpr int kWalkAnimIndex = 1;
     constexpr int kIdleAnimIndex = 2;
+    constexpr int kJumpAnimIndex = 3;
+    constexpr int kDodgeBackAnimIndex = 4;
+    constexpr int kDodgeForwardAnimIndex = 5;
 }
 
 Player::Player()
@@ -25,6 +28,13 @@ Player::Player()
     , comboStep_(0)
     , pendingCombo_(false)
     , comboSegmentDuration_(0.0f)
+    , isJumping_(false)
+    , isDodging_(false)
+    , actionTimer_(0.0f)
+    , jumpHeight_(0.0f)
+    , dodgeDirection_(VGet(0.0f, 0.0f, 0.0f))
+    , savedPosition_(VGet(0.0f, 0.0f, 0.0f))
+    , previousKeyInput_(0)
 {
 }
 
@@ -38,6 +48,13 @@ void Player::Initialize()
     comboStep_ = 0;
     pendingCombo_ = false;
     comboSegmentDuration_ = 0.0f;
+    isJumping_ = false;
+    isDodging_ = false;
+    actionTimer_ = 0.0f;
+    jumpHeight_ = 0.0f;
+    dodgeDirection_ = VGet(0.0f, 0.0f, 0.0f);
+    savedPosition_ = VGet(0.0f, 0.0f, 0.0f);
+    previousKeyInput_ = 0;
 }
 
 bool Player::LoadModel(const TCHAR* modelPath)
@@ -112,7 +129,84 @@ bool Player::LoadModel(const TCHAR* modelPath)
 
 void Player::Update()
 {
+    // アクション中の更新
+    if (isJumping_ || isDodging_)
+    {
+        const float deltaTime = 1.0f / 60.0f;
+        actionTimer_ += deltaTime;
+
+        if (isJumping_)
+        {
+            // ジャンプの放物線運動
+            const float jumpDuration = 0.8f;
+            const float maxHeight = 50.0f;
+
+            if (actionTimer_ < jumpDuration)
+            {
+                const float t = actionTimer_ / jumpDuration;
+                jumpHeight_ = maxHeight * 4.0f * t * (1.0f - t);  // 放物線
+            }
+            else
+            {
+                jumpHeight_ = 0.0f;
+                isJumping_ = false;
+                actionTimer_ = 0.0f;
+            }
+        }
+        else if (isDodging_)
+        {
+            // 回避移動
+            const float dodgeDuration = 0.5f;
+            const float animDuration = 0.4f;
+            const float dodgeSpeed = 12.0f;  // 移動速度を調整
+
+            // 移動はコードで制御（アニメーションのルートモーションは無視）
+            if (actionTimer_ < dodgeDuration)
+            {
+                const float moveAmount = dodgeSpeed * deltaTime;
+                position_.x += dodgeDirection_.x * moveAmount;
+                position_.z += dodgeDirection_.z * moveAmount;
+            }
+
+            // アニメーションは0.4秒で終了
+            if (actionTimer_ >= animDuration)
+            {
+                isDodging_ = false;
+                actionTimer_ = 0.0f;
+
+                TCHAR debugMsg[256];
+                _stprintf_s(debugMsg, 256, _T("[Dodge End] Final position: (%.2f, %.2f)\n"), 
+                           position_.x, position_.z);
+                OutputDebugString(debugMsg);
+            }
+        }
+
+        animationController_.Update();
+
+        // モデル位置を常にposition_で上書き（アニメーションのルートモーションを無視）
+        if (modelHandle_ >= 0)
+        {
+            VECTOR drawPos = position_;
+            drawPos.y += jumpHeight_;
+            MV1SetPosition(modelHandle_, drawPos);
+            MV1SetRotationXYZ(modelHandle_, VGet(0.0f, modelRotationY_, 0.0f));
+        }
+
+        // アクション終了後、通常状態に戻る処理を継続
+        if (!isJumping_ && !isDodging_)
+        {
+            // アクション終了後、通常アニメーションに戻す
+            SwitchAnimation(false);
+        }
+        else
+        {
+            return;  // まだアクション中なら早期リターン
+        }
+    }
+
+    // 通常の移動処理
     VECTOR move = VGet(0.0f, 0.0f, 0.0f);
+    const bool isShiftPressed = CheckHitKey(KEY_INPUT_LSHIFT) || CheckHitKey(KEY_INPUT_RSHIFT);
 
     if (CheckHitKey(KEY_INPUT_W)) move.z += 1.0f;
     if (CheckHitKey(KEY_INPUT_S)) move.z -= 1.0f;
@@ -122,7 +216,74 @@ void Player::Update()
     const float length = std::sqrt(move.x * move.x + move.z * move.z);
     const bool isMoving = (length > 0.0f);
 
-    if (isMoving)
+    // スペースキーでジャンプ
+    int currentKeyInput = 0;
+    if (CheckHitKey(KEY_INPUT_SPACE)) currentKeyInput |= 1;
+    if (CheckHitKey(KEY_INPUT_W)) currentKeyInput |= 2;
+    if (CheckHitKey(KEY_INPUT_S)) currentKeyInput |= 4;
+    if (CheckHitKey(KEY_INPUT_A)) currentKeyInput |= 8;
+    if (CheckHitKey(KEY_INPUT_D)) currentKeyInput |= 16;
+
+    const bool spacePressed = (currentKeyInput & 1) && !(previousKeyInput_ & 1);
+
+    // Shiftキー押下時の回避処理
+    const bool shiftPressed = isShiftPressed && !(CheckHitKey(KEY_INPUT_LSHIFT) || CheckHitKey(KEY_INPUT_RSHIFT));  // 今回押された瞬間を検知したい場合
+
+    // Shift単体で後方回避、WASD+Shiftで前方回避
+    if (isShiftPressed && !attack_.IsAttacking() && comboStep_ == 0)
+    {
+        // WASDいずれかが押されている場合は前方回避
+        if (isMoving)
+        {
+            isDodging_ = true;
+            actionTimer_ = 0.0f;
+
+            // 前方方向を計算（現在の向き）
+            dodgeDirection_ = VGet(
+                std::sin(modelRotationY_ - kDefaultRotationY),
+                0.0f,
+                std::cos(modelRotationY_ - kDefaultRotationY)
+            );
+
+            PlayActionAnimation(kDodgeForwardAnimIndex, 0.5f);
+
+            previousKeyInput_ = currentKeyInput;
+            return;
+        }
+        // WASD押されていない場合は後方回避
+        else
+        {
+            isDodging_ = true;
+            actionTimer_ = 0.0f;
+
+            // 後方方向を計算（現在の向きの逆）
+            dodgeDirection_ = VGet(
+                -std::sin(modelRotationY_ - kDefaultRotationY),
+                0.0f,
+                -std::cos(modelRotationY_ - kDefaultRotationY)
+            );
+
+            PlayActionAnimation(kDodgeBackAnimIndex, 0.5f);
+
+            previousKeyInput_ = currentKeyInput;
+            return;
+        }
+    }
+
+    // スペースキーでジャンプ
+    if (spacePressed && !attack_.IsAttacking() && comboStep_ == 0)
+    {
+        isJumping_ = true;
+        actionTimer_ = 0.0f;
+        jumpHeight_ = 0.0f;
+        PlayActionAnimation(kJumpAnimIndex, 0.8f);
+
+        previousKeyInput_ = currentKeyInput;
+        return;
+    }
+
+    // 通常移動
+    if (isMoving && !isShiftPressed)
     {
         move.x /= length;
         move.z /= length;
@@ -141,27 +302,24 @@ void Player::Update()
         }
     }
 
-    // キーボード入力
-    // Qキー（弱攻撃）は押された瞬間のみ
-    int currentKeyInput = 0;
+    // 攻撃入力
+    int currentAttackInput = 0;
     if (CheckHitKey(KEY_INPUT_Q))
     {
-        currentKeyInput |= 1;
+        currentAttackInput |= 1;
     }
 
-    const bool attackPressed = (currentKeyInput & 1) && !(previousMouseInput_ & 1);
+    const bool attackPressed = (currentAttackInput & 1) && !(previousMouseInput_ & 1);
 
     if (attackPressed)
     {
         if (comboStep_ == 0)
         {
-            // 1段目開始
             attack_.ExecuteWeakAttack();
             PlayComboSegment(0);
         }
         else if (comboStep_ <= 2)
         {
-            // 2段目・3段目を予約
             pendingCombo_ = true;
         }
     }
@@ -171,7 +329,8 @@ void Player::Update()
         SwitchAnimation(isMoving);
     }
 
-    previousMouseInput_ = currentKeyInput;
+    previousMouseInput_ = currentAttackInput;
+    previousKeyInput_ = currentKeyInput;
 
     attack_.Update();
     UpdateAttackAnimation();
@@ -202,6 +361,11 @@ void Player::Draw() const
                      animationController_.IsPlaying() ? _T("TRUE") : _T("FALSE"));
     DrawFormatString(10, 170, GetColor(255, 200, 100), _T("ComboStep: %d, Pending: %s"), 
                      comboStep_, pendingCombo_ ? _T("YES") : _T("NO"));
+    DrawFormatString(10, 190, GetColor(255, 200, 100), _T("AnimTime: %.2f"), 
+                     animationController_.GetCurrentTime());
+    DrawFormatString(10, 210, GetColor(100, 255, 100), _T("Jump: %s, Dodge: %s"), 
+                     isJumping_ ? _T("YES") : _T("NO"), isDodging_ ? _T("YES") : _T("NO"));
+    DrawFormatString(10, 230, GetColor(100, 255, 100), _T("JumpHeight: %.2f"), jumpHeight_);
     DrawFormatString(10, 190, GetColor(255, 200, 100), _T("AnimTime: %.2f"), 
                      animationController_.GetCurrentTime());
 
@@ -362,5 +526,24 @@ void Player::PlayComboSegment(int step)
     TCHAR debugMsg[256];
     _stprintf_s(debugMsg, 256, _T("[PlayComboSegment] step=%d, start=%.2f, end=%.2f, speed=%.2f, targetDur=%.2f\n"), 
                 step, start, end, speed, targetDuration);
+    OutputDebugString(debugMsg);
+}
+
+void Player::PlayActionAnimation(int animIndex, float duration)
+{
+    animationController_.StopAnimation();
+    animationController_.Initialize(modelHandle_);
+
+    // アニメーション全体の長さを取得
+    const float totalTime = MV1GetAnimTotalTime(modelHandle_, animIndex);
+
+    // 指定時間で再生するための速度を計算
+    const float speed = (duration > 0.0f && totalTime > 0.0f) ? (totalTime / duration) : 1.0f;
+
+    animationController_.PlayAnimation(animIndex, speed, false, 0.0f, totalTime);
+
+    TCHAR debugMsg[256];
+    _stprintf_s(debugMsg, 256, _T("[PlayActionAnimation] animIndex=%d, totalTime=%.2f, duration=%.2f, speed=%.2f\n"), 
+                animIndex, totalTime, duration, speed);
     OutputDebugString(debugMsg);
 }
