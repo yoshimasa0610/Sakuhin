@@ -6,19 +6,14 @@
 
 namespace
 {
+    // ファイル存在確認
     bool FileExists(const TCHAR* path)
     {
         return _taccess(path, 0) == 0;
     }
-
-    void OutputLoadLog(const TCHAR* message, const TCHAR* path)
-    {
-        TCHAR buffer[1024] = { 0 };
-        _stprintf_s(buffer, _T("[PlayerModel] %s : %s\n"), message, path);
-        OutputDebugString(buffer);
-    }
 }
 
+// プレイヤーとモデル読み込みの初期化
 void PlayerManager::Initialize()
 {
     player_.Initialize();
@@ -26,6 +21,7 @@ void PlayerManager::Initialize()
     modelLoaded_ = false;
     _tcscpy_s(loadedModelPath_, _T("Load Failed"));
 
+    // 相対パス候補を順番に試す
     const TCHAR* relativeCandidates[] =
     {
         _T("Source/Images/Player/Player.x"),
@@ -37,7 +33,6 @@ void PlayerManager::Initialize()
     {
         if (!FileExists(path))
         {
-            OutputLoadLog(_T("File not found"), path);
             continue;
         }
 
@@ -45,13 +40,11 @@ void PlayerManager::Initialize()
         {
             modelLoaded_ = true;
             _tcscpy_s(loadedModelPath_, path);
-            OutputLoadLog(_T("Load success"), path);
             return;
         }
-
-        OutputLoadLog(_T("Load failed"), path);
     }
 
+    // 実行ファイル位置から絶対パスで再試行
     TCHAR exePath[MAX_PATH] = { 0 };
     GetModuleFileName(NULL, exePath, MAX_PATH);
 
@@ -66,7 +59,6 @@ void PlayerManager::Initialize()
 
     if (!FileExists(absolutePath))
     {
-        OutputLoadLog(_T("File not found"), absolutePath);
         return;
     }
 
@@ -74,48 +66,53 @@ void PlayerManager::Initialize()
     {
         modelLoaded_ = true;
         _tcscpy_s(loadedModelPath_, absolutePath);
-        OutputLoadLog(_T("Load success"), absolutePath);
         return;
     }
-
-    OutputLoadLog(_T("Load failed"), absolutePath);
 }
 
-void PlayerManager::Update()
+// プレイヤー更新
+void PlayerManager::Update(float cameraYaw)
 {
-    player_.Update();
+    player_.Update(cameraYaw);
 }
 
+// プレイヤー描画
 void PlayerManager::Draw() const
 {
     player_.Draw();
 }
 
+// 終了処理
 void PlayerManager::Finalize()
 {
     player_.Finalize();
 }
 
+// プレイヤー位置取得
 VECTOR PlayerManager::GetPlayerPosition() const
 {
     return player_.GetPosition();
 }
 
+// 攻撃種別取得
 AttackType PlayerManager::GetPlayerCurrentAttack() const
 {
     return player_.GetCurrentAttack();
 }
 
+// 攻撃中判定
 bool PlayerManager::IsPlayerAttacking() const
 {
     return player_.IsAttacking();
 }
 
+// モデル読み込み成否
 bool PlayerManager::IsPlayerModelLoaded() const
 {
     return modelLoaded_;
 }
 
+// 読み込んだモデルパス取得
 const TCHAR* PlayerManager::GetLoadedModelPath() const
 {
     return loadedModelPath_;

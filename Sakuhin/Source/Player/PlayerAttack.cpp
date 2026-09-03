@@ -1,6 +1,6 @@
 #include "PlayerAttack.h"
-#include <DxLib.h>
 
+// コンストラクタ
 Attack::Attack()
     : currentAttack_(AttackType::None)
     , attackTimer_(0.0f)
@@ -8,6 +8,7 @@ Attack::Attack()
 {
 }
 
+// 初期化
 void Attack::Initialize()
 {
     currentAttack_ = AttackType::None;
@@ -15,6 +16,7 @@ void Attack::Initialize()
     attackDuration_ = 0.0f;
 }
 
+// 攻撃タイマー更新
 void Attack::Update()
 {
     if (currentAttack_ != AttackType::None)
@@ -29,31 +31,17 @@ void Attack::Update()
     }
 }
 
+// 現在は描画なし
 void Attack::Draw() const
 {
-    // デバッグ表示
-    DrawFormatString(10, 10, GetColor(255, 255, 255), _T("Press Q for Weak Attack"));
-    
-    const TCHAR* attackState = _T("None");
-    if (currentAttack_ == AttackType::WeakAttack)
-    {
-        attackState = _T("WeakAttack");
-    }
-    else if (currentAttack_ == AttackType::StrongAttack)
-    {
-        attackState = _T("StrongAttack");
-    }
-    
-    DrawFormatString(10, 30, GetColor(255, 255, 0), _T("Attack State: %s"), attackState);
-    DrawFormatString(10, 50, GetColor(255, 255, 0), _T("Attack Timer: %.2f / %.2f"), attackTimer_, attackDuration_);
-    DrawFormatString(10, 70, GetColor(0, 255, 0), _T("IsAttacking: %s"), 
-                     IsAttacking() ? _T("TRUE") : _T("FALSE"));
 }
 
+// 終了処理
 void Attack::Finalize()
 {
 }
 
+// 弱攻撃開始
 void Attack::ExecuteWeakAttack()
 {
     currentAttack_ = AttackType::WeakAttack;
@@ -61,6 +49,7 @@ void Attack::ExecuteWeakAttack()
     attackDuration_ = 0.5f;
 }
 
+// 強攻撃開始
 void Attack::ExecuteStrongAttack()
 {
     currentAttack_ = AttackType::StrongAttack;
@@ -68,22 +57,26 @@ void Attack::ExecuteStrongAttack()
     attackDuration_ = 1.0f;
 }
 
+// 攻撃キャンセル
 void Attack::CancelAttack()
 {
     currentAttack_ = AttackType::None;
     attackTimer_ = 0.0f;
 }
 
+// 現在攻撃種別
 AttackType Attack::GetCurrentAttack() const
 {
     return currentAttack_;
 }
 
+// 攻撃中判定
 bool Attack::IsAttacking() const
 {
     return currentAttack_ != AttackType::None;
 }
 
+// 経過時間取得
 float Attack::GetAttackDuration() const
 {
     return attackTimer_;
