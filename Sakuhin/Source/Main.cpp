@@ -1,5 +1,6 @@
 #include <DxLib.h>
 #include "Player/PlayerManager.h"
+#include "Enemy/EnemyManager.h"
 #include <cmath>
 
 namespace
@@ -55,9 +56,11 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
         return -1;
     }
 
-    // プレイヤー管理クラス生成
+    // 管理クラス生成
     PlayerManager playerManager;
+    EnemyManager enemyManager;
     playerManager.Initialize();
+    enemyManager.Initialize();
 
     // カメラ制御パラメータ
     float cameraYaw = 3.14159f;
@@ -73,29 +76,18 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     while (ProcessMessage() == 0 && CheckHitKey(KEY_INPUT_ESCAPE) == 0)
     {
         // 矢印キーでカメラ角度を更新
-        if (CheckHitKey(KEY_INPUT_LEFT))
-        {
-            cameraYaw -= kCameraYawSpeed;
-        }
-        if (CheckHitKey(KEY_INPUT_RIGHT))
-        {
-            cameraYaw += kCameraYawSpeed;
-        }
-        if (CheckHitKey(KEY_INPUT_UP))
-        {
-            cameraPitch += kCameraPitchSpeed;
-        }
-        if (CheckHitKey(KEY_INPUT_DOWN))
-        {
-            cameraPitch -= kCameraPitchSpeed;
-        }
+        if (CheckHitKey(KEY_INPUT_LEFT)) cameraYaw -= kCameraYawSpeed;
+        if (CheckHitKey(KEY_INPUT_RIGHT)) cameraYaw += kCameraYawSpeed;
+        if (CheckHitKey(KEY_INPUT_UP)) cameraPitch += kCameraPitchSpeed;
+        if (CheckHitKey(KEY_INPUT_DOWN)) cameraPitch -= kCameraPitchSpeed;
 
         // ピッチ角を制限
         if (cameraPitch < kCameraMinPitch) cameraPitch = kCameraMinPitch;
         if (cameraPitch > kCameraMaxPitch) cameraPitch = kCameraMaxPitch;
 
-        // プレイヤー更新（カメラYawを渡す）
+        // 更新
         playerManager.Update(cameraYaw);
+        enemyManager.Update();
 
         // カメラ目標位置（プレイヤー中心）
         const VECTOR playerPos = playerManager.GetPlayerPosition();
@@ -104,23 +96,23 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
         // 球面座標でカメラ位置を算出
         const float horizontalDistance = kCameraDistance * std::cos(cameraPitch);
         const float heightOffset = kCameraDistance * std::sin(cameraPitch);
-
         const VECTOR cameraPos = VGet(
             cameraTarget.x - std::sin(cameraYaw) * horizontalDistance,
             cameraTarget.y + heightOffset,
             cameraTarget.z - std::cos(cameraYaw) * horizontalDistance);
 
-        // カメラ反映
         SetCameraPositionAndTarget_UpVecY(cameraPos, cameraTarget);
 
         // 描画
         ClearDrawScreen();
         DrawDebugFloor();
+        enemyManager.Draw();
         playerManager.Draw();
         ScreenFlip();
     }
 
     // 終了処理
+    enemyManager.Finalize();
     playerManager.Finalize();
     DxLib_End();
 

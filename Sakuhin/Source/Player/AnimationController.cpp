@@ -100,6 +100,47 @@ bool AnimationController::PlayAnimation(int animIndex, float speed, bool loop, f
     return false;
 }
 
+// 指定区間を指定時間で再生
+bool AnimationController::PlaySegment(int animIndex, float startTime, float endTime, float duration, bool loop)
+{
+    if (!IsValidAnimIndex(animIndex))
+    {
+        return false;
+    }
+
+    const float totalTime = GetAnimTotalTime(animIndex);
+    const float start = (startTime < 0.0f) ? 0.0f : startTime;
+    const float end = (endTime > 0.0f) ? endTime : totalTime;
+    const float length = end - start;
+
+    const float speed = (duration > 0.0f && length > 0.0f) ? (length / duration) : 1.0f;
+    return PlayAnimation(animIndex, speed, loop, start, end);
+}
+
+// 全体を1回再生
+bool AnimationController::PlayOneShot(int animIndex, float duration)
+{
+    if (!IsValidAnimIndex(animIndex))
+    {
+        return false;
+    }
+
+    const float totalTime = GetAnimTotalTime(animIndex);
+    return PlaySegment(animIndex, 0.0f, totalTime, duration, false);
+}
+
+// 全体をループ再生
+bool AnimationController::PlayLoop(int animIndex, float duration)
+{
+    if (!IsValidAnimIndex(animIndex))
+    {
+        return false;
+    }
+
+    const float totalTime = GetAnimTotalTime(animIndex);
+    return PlaySegment(animIndex, 0.0f, totalTime, duration, true);
+}
+
 // 再生位置を直接設定
 void AnimationController::SetCurrentTime(float time)
 {
@@ -180,4 +221,26 @@ float AnimationController::GetAnimationDuration() const
 int AnimationController::GetCurrentAnimIndex() const
 {
     return currentAnimIndex_;
+}
+
+// 指定アニメ番号が有効か
+bool AnimationController::IsValidAnimIndex(int animIndex) const
+{
+    if (modelHandle_ < 0 || animIndex < 0)
+    {
+        return false;
+    }
+
+    return animIndex < MV1GetAnimNum(modelHandle_);
+}
+
+// 指定アニメの総時間取得
+float AnimationController::GetAnimTotalTime(int animIndex) const
+{
+    if (!IsValidAnimIndex(animIndex))
+    {
+        return 0.0f;
+    }
+
+    return MV1GetAnimTotalTime(modelHandle_, animIndex);
 }

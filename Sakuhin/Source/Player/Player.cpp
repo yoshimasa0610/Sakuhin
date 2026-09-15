@@ -73,8 +73,6 @@ Player::Player()
     , modelHandle_(-1)
     , useWalkAnimation_(false)
     , modelLoaded_(false)
-    , idleAnimSpeed_(1.0f)
-    , walkAnimSpeed_(1.0f)
     , totalAnimationCount_(0)
     , attackAnimIndex_(0)
     , walkAnimIndex_(1)
@@ -94,6 +92,8 @@ Player::Player()
     , gravity_(-650.0f)
     , jumpStartVelocity_(620.0f)
     , isGrounded_(true)
+    , isAirAttackLocked_(false)
+    , airAttackLockPosition_(VGet(0.0f, 0.0f, 0.0f))
     , previousKeyInput_(0)
 {
 }
@@ -117,6 +117,8 @@ void Player::Initialize()
     gravity_ = -650.0f;
     jumpStartVelocity_ = 620.0f;
     isGrounded_ = true;
+    isAirAttackLocked_ = false;
+    airAttackLockPosition_ = VGet(0.0f, 0.0f, 0.0f);
     previousKeyInput_ = 0;
 
     attackAnimIndex_ = 0;
@@ -248,8 +250,8 @@ bool Player::LoadModel(const TCHAR* modelPath)
     MV1SetPosition(modelHandle_, position_);
     MV1SetRotationXYZ(modelHandle_, VGet(0.0f, modelRotationY_, 0.0f));
 
-    walkAnimSpeed_ = CalculateAnimationSpeed(modelHandle_, walkAnimIndex_, 1.5f);
-    idleAnimSpeed_ = CalculateAnimationSpeed(modelHandle_, idleAnimIndex_, 4.0f);
+    // アニメーションコントローラーをモデルに接続
+    animationController_.Initialize(modelHandle_);
 
     modelLoaded_ = true;
     SwitchAnimation(false);
@@ -299,12 +301,7 @@ void Player::Update(float cameraYaw)
     // ジャンプ後半（落下区間）を再生して30F付近で停止
     auto PlayJumpFallHalf = [this]()
     {
-        if (modelHandle_ < 0)
-        {
-            return;
-        }
-
-        const float jumpTotal = MV1GetAnimTotalTime(modelHandle_, jumpAnimIndex_);
+        const float jumpTotal = animationController_.GetAnimTotalTime(jumpAnimIndex_);
         const float jumpHalf = (jumpTotal > 0.0f) ? (jumpTotal * 0.5f) : 0.0f;
         float fallStop = kJumpFallHoldFrame;
         if (fallStop < jumpHalf)
@@ -316,26 +313,15 @@ void Player::Update(float cameraYaw)
             fallStop = jumpTotal;
         }
 
-        const float segmentLength = fallStop - jumpHalf;
-        const float speed = (segmentLength > 0.0f && kJumpFallAnimDuration > 0.0f)
-            ? (segmentLength / kJumpFallAnimDuration)
-            : 1.0f;
-
-        animationController_.StopAnimation();
-        animationController_.Initialize(modelHandle_);
-        animationController_.PlayAnimation(jumpAnimIndex_, speed, false, jumpHalf, fallStop);
+        // 落下区間を指定時間で再生
+        animationController_.PlaySegment(jumpAnimIndex_, jumpHalf, fallStop, kJumpFallAnimDuration, false);
         isFallingAnimActive_ = true;
     };
 
     // 30F保持から着地残りモーションを再生
     auto PlayJumpLandingFromHold = [this]() -> bool
     {
-        if (modelHandle_ < 0)
-        {
-            return false;
-        }
-
-        const float jumpTotal = MV1GetAnimTotalTime(modelHandle_, jumpAnimIndex_);
+        const float jumpTotal = animationController_.GetAnimTotalTime(jumpAnimIndex_);
         const float landingStart = (kJumpFallHoldFrame < jumpTotal) ? kJumpFallHoldFrame : jumpTotal;
         const float landingLength = jumpTotal - landingStart;
         if (landingLength <= 0.0f)
@@ -343,14 +329,8 @@ void Player::Update(float cameraYaw)
             return false;
         }
 
-        const float speed = (kJumpLandingAnimDuration > 0.0f)
-            ? (landingLength / kJumpLandingAnimDuration)
-            : 1.0f;
-
-        animationController_.StopAnimation();
-        animationController_.Initialize(modelHandle_);
-        animationController_.PlayAnimation(jumpAnimIndex_, speed, false, landingStart, jumpTotal);
-        return true;
+        // 30Fから終端までを短時間で再生
+        return animationController_.PlaySegment(jumpAnimIndex_, landingStart, jumpTotal, kJumpLandingAnimDuration, false);
     };
 
     // 空中物理（上昇/落下）
@@ -379,19 +359,34 @@ void Player::Update(float cameraYaw)
 
         if (isJumping_)
         {
-            ApplyAirPhysics();
-            airPhysicsApplied = true;
-
-            if (!isGrounded_ && verticalVelocity_ < -1.0f && !isFallingAnimActive_ && modelHandle_ >= 0)
+            // 空中攻撃中は位置固定し、落下させない
+            if (isAirAttackLocked_)
             {
-                PlayJumpFallHalf();
+                verticalVelocity_ = 0.0f;
+                position_ = airAttackLockPosition_;
             }
-
-            ClampToGround();
-
-            if (isGrounded_)
+            else
             {
-                actionTimer_ = 0.0f;
+                ApplyAirPhysics();
+                airPhysicsApplied = true;
+
+                // 落下アニメは非攻撃時のみ開始する
+                if (!isGrounded_
+                    && verticalVelocity_ < -1.0f
+                    && !isFallingAnimActive_
+                    && !attack_.IsAttacking()
+                    && comboStep_ == 0
+                    && modelHandle_ >= 0)
+                {
+                    PlayJumpFallHalf();
+                }
+
+                ClampToGround();
+
+                if (isGrounded_)
+                {
+                    actionTimer_ = 0.0f;
+                }
             }
         }
         else if (isDodging_)
@@ -474,18 +469,28 @@ void Player::Update(float cameraYaw)
     if (CheckHitKey(KEY_INPUT_D)) currentKeyInput |= 16;
 
     const bool spacePressed = (currentKeyInput & 1) && !(previousKeyInput_ & 1);
+    const bool hasMoveKeyInput = (currentKeyInput & (2 | 4 | 8 | 16)) != 0;
 
-    // Shift単体で後方回避、WASD+Shiftで前方回避
+    // Shift単体で後方回避、WASD入力+Shiftで前方回避
     if (isShiftPressed && !attack_.IsAttacking() && comboStep_ == 0 && isGrounded_)
     {
-        if (isMoving)
+        if (hasMoveKeyInput)
         {
             isDodging_ = true;
             actionTimer_ = 0.0f;
 
+            // 入力方向(カメラ基準)へ向きを合わせてから前方回避する
+            if (length > 0.0f)
+            {
+                const float moveX = move.x / length;
+                const float moveZ = move.z / length;
+                modelRotationY_ = static_cast<float>(std::atan2(moveX, moveZ)) + kDefaultRotationY;
+            }
+
             if (modelHandle_ >= 0)
             {
                 MV1SetPosition(modelHandle_, position_);
+                MV1SetRotationXYZ(modelHandle_, VGet(0.0f, modelRotationY_, 0.0f));
             }
 
             PlayActionAnimation(dodgeForwardAnimIndex_, 0.5f);
@@ -501,6 +506,7 @@ void Player::Update(float cameraYaw)
             if (modelHandle_ >= 0)
             {
                 MV1SetPosition(modelHandle_, position_);
+                MV1SetRotationXYZ(modelHandle_, VGet(0.0f, modelRotationY_, 0.0f));
             }
 
             PlayActionAnimation(dodgeBackAnimIndex_, 0.5f);
@@ -520,19 +526,9 @@ void Player::Update(float cameraYaw)
         verticalVelocity_ = jumpStartVelocity_;
         jumpHeight_ = 0.0f;
 
-        if (modelHandle_ >= 0)
-        {
-            const float jumpTotal = MV1GetAnimTotalTime(modelHandle_, jumpAnimIndex_);
-            const float jumpHalf = (jumpTotal > 0.0f) ? (jumpTotal * 0.5f) : 0.0f;
-            const float segmentLength = jumpHalf;
-            const float speed = (segmentLength > 0.0f && kJumpRiseAnimDuration > 0.0f)
-                ? (segmentLength / kJumpRiseAnimDuration)
-                : 1.0f;
-
-            animationController_.StopAnimation();
-            animationController_.Initialize(modelHandle_);
-            animationController_.PlayAnimation(jumpAnimIndex_, speed, false, 0.0f, jumpHalf);
-        }
+        const float jumpTotal = animationController_.GetAnimTotalTime(jumpAnimIndex_);
+        const float jumpHalf = (jumpTotal > 0.0f) ? (jumpTotal * 0.5f) : 0.0f;
+        animationController_.PlaySegment(jumpAnimIndex_, 0.0f, jumpHalf, kJumpRiseAnimDuration, false);
 
         previousKeyInput_ = currentKeyInput;
     }
@@ -620,8 +616,16 @@ void Player::Update(float cameraYaw)
     // アクション外での空中物理
     if (!isGrounded_ && !airPhysicsApplied)
     {
-        ApplyAirPhysics();
-        ClampToGround();
+        if (!isAirAttackLocked_)
+        {
+            ApplyAirPhysics();
+            ClampToGround();
+        }
+        else
+        {
+            verticalVelocity_ = 0.0f;
+            position_ = airAttackLockPosition_;
+        }
     }
 
     // 着地イベント時のアニメ遷移
@@ -658,19 +662,27 @@ void Player::Update(float cameraYaw)
         const bool isAttackAnimating = attack_.IsAttacking() || comboStep_ > 0;
         if (isAttackAnimating)
         {
-            VECTOR modelPos = MV1GetPosition(modelHandle_);
-            position_.x = modelPos.x;
-            position_.z = modelPos.z;
-
-            if (isGrounded_)
+            if (isAirAttackLocked_)
             {
-                position_.y = modelPos.y;
-                ClampToGround();
+                position_ = airAttackLockPosition_;
+                MV1SetPosition(modelHandle_, airAttackLockPosition_);
             }
             else
             {
-                modelPos.y = position_.y;
-                MV1SetPosition(modelHandle_, modelPos);
+                VECTOR modelPos = MV1GetPosition(modelHandle_);
+                position_.x = modelPos.x;
+                position_.z = modelPos.z;
+
+                if (isGrounded_)
+                {
+                    position_.y = modelPos.y;
+                    ClampToGround();
+                }
+                else
+                {
+                    modelPos.y = position_.y;
+                    MV1SetPosition(modelHandle_, modelPos);
+                }
             }
         }
         else
@@ -731,29 +743,6 @@ bool Player::IsAttacking() const
     return attack_.IsAttacking();
 }
 
-// アニメ速度計算
-float Player::CalculateAnimationSpeed(int targetModelHandle, int animIndex, float targetDuration) const
-{
-    if (targetModelHandle < 0 || animIndex < 0 || targetDuration <= 0.0f)
-    {
-        return 1.0f;
-    }
-
-    const int animNum = MV1GetAnimNum(targetModelHandle);
-    if (animIndex >= animNum)
-    {
-        return 1.0f;
-    }
-
-    const float totalTime = MV1GetAnimTotalTime(targetModelHandle, animIndex);
-    if (totalTime <= 0.0f)
-    {
-        return 1.0f;
-    }
-
-    return totalTime / targetDuration;
-}
-
 // 待機/移動アニメ切り替え
 void Player::SwitchAnimation(bool useWalkAnimation)
 {
@@ -769,12 +758,11 @@ void Player::SwitchAnimation(bool useWalkAnimation)
 
     useWalkAnimation_ = useWalkAnimation;
 
+    // 待機と移動の目標時間をここで統一管理
     const int animIndex = useWalkAnimation_ ? walkAnimIndex_ : idleAnimIndex_;
-    const float animSpeed = useWalkAnimation_ ? walkAnimSpeed_ : idleAnimSpeed_;
+    const float targetDuration = useWalkAnimation_ ? 1.5f : 4.0f;
 
-    animationController_.StopAnimation();
-    animationController_.Initialize(modelHandle_);
-    animationController_.PlayAnimation(animIndex, animSpeed, true, 0.0f, 0.0f);  // ループアニメーション
+    animationController_.PlayLoop(animIndex, targetDuration);
 }
 
 // 攻撃コンボアニメ更新
@@ -796,7 +784,7 @@ void Player::UpdateAttackAnimation()
         }
         else
         {
-            // コンボ終了
+            // コンボ終了時は空中固定を解除
             if (modelHandle_ >= 0)
             {
                 position_ = MV1GetPosition(modelHandle_);
@@ -804,7 +792,9 @@ void Player::UpdateAttackAnimation()
             comboStep_ = 0;
             pendingCombo_ = false;
             attack_.CancelAttack();
+            isAirAttackLocked_ = false;
 
+            // 空中コンボ後は落下アニメを強制せず、状態に応じて遷移
             if (isGrounded_)
             {
                 isFallingAnimActive_ = false;
@@ -812,16 +802,7 @@ void Player::UpdateAttackAnimation()
             }
             else
             {
-                const float jumpTotal = MV1GetAnimTotalTime(modelHandle_, jumpAnimIndex_);
-                const float jumpHalf = (jumpTotal > 0.0f) ? (jumpTotal * 0.5f) : 0.0f;
-                const float segmentLength = jumpTotal - jumpHalf;
-                const float speed = (segmentLength > 0.0f && kJumpFallAnimDuration > 0.0f)
-                    ? (segmentLength / kJumpFallAnimDuration)
-                    : 1.0f;
-                animationController_.StopAnimation();
-                animationController_.Initialize(modelHandle_);
-                animationController_.PlayAnimation(jumpAnimIndex_, speed, false, jumpHalf, jumpTotal);
-                isFallingAnimActive_ = true;
+                isFallingAnimActive_ = false;
             }
         }
     }
@@ -830,8 +811,16 @@ void Player::UpdateAttackAnimation()
 // コンボ段の再生区間設定
 void Player::PlayComboSegment(int step)
 {
-    animationController_.StopAnimation();
-    animationController_.Initialize(modelHandle_);
+    // 空中攻撃は各段の開始位置を固定し、段中は落下しないようにする
+    if (!isGrounded_)
+    {
+        isAirAttackLocked_ = true;
+        airAttackLockPosition_ = position_;
+    }
+    else
+    {
+        isAirAttackLocked_ = false;
+    }
 
     float start = 0.0f;
     float end = 0.0f;
@@ -856,12 +845,8 @@ void Player::PlayComboSegment(int step)
         targetDuration = 0.7f;
     }
 
-    const float segmentLength = end - start;
-    const float speed = (targetDuration > 0.0f && segmentLength > 0.0f)
-        ? (segmentLength / targetDuration)
-        : 1.0f;
-
-    animationController_.PlayAnimation(attackAnimIndex_, speed, false, start, end);
+    // コンボ段の区間を指定時間で再生
+    animationController_.PlaySegment(attackAnimIndex_, start, end, targetDuration, false);
     comboStep_ = step + 1;
 
     attack_.ExecuteWeakAttack();
@@ -870,22 +855,6 @@ void Player::PlayComboSegment(int step)
 // 単発アクション再生
 void Player::PlayActionAnimation(int animIndex, float duration)
 {
-    if (modelHandle_ < 0)
-    {
-        return;
-    }
-
-    const int animCount = MV1GetAnimNum(modelHandle_);
-    if (animIndex < 0 || animIndex >= animCount)
-    {
-        return;
-    }
-
-    animationController_.StopAnimation();
-    animationController_.Initialize(modelHandle_);
-
-    const float totalTime = MV1GetAnimTotalTime(modelHandle_, animIndex);
-    const float speed = (duration > 0.0f && totalTime > 0.0f) ? (totalTime / duration) : 1.0f;
-
-    animationController_.PlayAnimation(animIndex, speed, false, 0.0f, totalTime);
+    // 単発アクションは全体を指定時間で1回再生
+    animationController_.PlayOneShot(animIndex, duration);
 }

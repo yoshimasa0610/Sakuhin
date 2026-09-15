@@ -36,9 +36,6 @@ public:
     bool IsAttacking() const;
 
 private:
-    // 指定アニメを targetDuration 秒で再生するための速度を計算
-    float CalculateAnimationSpeed(int targetModelHandle, int animIndex, float targetDuration) const;
-
     // 待機 / 移動のループアニメ切り替え
     void SwitchAnimation(bool useWalkAnimation);
 
@@ -63,8 +60,6 @@ private:
 
     // 読み込み済みモデル情報
     bool modelLoaded_;
-    float idleAnimSpeed_;
-    float walkAnimSpeed_;
     int totalAnimationCount_;
 
     // 使用アニメーション番号
@@ -89,6 +84,10 @@ private:
     float gravity_;
     float jumpStartVelocity_;
     bool isGrounded_;
+
+    // 空中攻撃中の位置固定状態
+    bool isAirAttackLocked_;
+    VECTOR airAttackLockPosition_;
 
     // サブシステム
     Attack attack_;
