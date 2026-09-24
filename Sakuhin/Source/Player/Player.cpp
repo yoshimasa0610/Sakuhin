@@ -1,4 +1,5 @@
 ﻿#include "Player.h"
+
 #include <cmath>
 #include <tchar.h>
 
@@ -8,7 +9,7 @@ namespace
     constexpr float kModelScale = 1.0f;
     constexpr float kDefaultRotationY = 3.14159f;
 
-    // デバッグ床の高さと範囲（床判定にも使用）
+    // 接地判定と床範囲
     constexpr float kGroundY = 0.0f;
     constexpr float kFloorMinX = -3000.0f;
     constexpr float kFloorMaxX = 3000.0f;
@@ -22,47 +23,16 @@ namespace
     constexpr float kJumpLandingAnimDuration = 0.20f;
     constexpr float kJumpFallHoldFrame = 30.0f;
 
-    // 既知アニメーション番号（モデル差し替え時の基準値）
-    constexpr int kKnownIdleAnimIndex = 10;
-    constexpr int kKnownJumpAnimIndex = 9;
-    constexpr int kKnownDodgeBackAnimIndex = 4;
-    constexpr int kKnownDodgeForwardAnimIndex = 5;
+    // 行動中の微移動量
+    constexpr float kDodgeMoveScale = 0.32f;
+    constexpr float kAttackMoveScale = 0.18f;
 
-    // 文字列にキーワードが含まれているかを大文字小文字無視で判定
-    bool ContainsIgnoreCase(const TCHAR* text, const TCHAR* token)
-    {
-        if (text == nullptr || token == nullptr)
-        {
-            return false;
-        }
+    // 回避後の回避攻撃受付時間
+    constexpr float kDodgeAttackGraceDuration = 1.0f;
 
-        const int textLen = static_cast<int>(_tcslen(text));
-        const int tokenLen = static_cast<int>(_tcslen(token));
-        if (tokenLen <= 0 || textLen < tokenLen)
-        {
-            return false;
-        }
-
-        for (int i = 0; i <= textLen - tokenLen; ++i)
-        {
-            bool match = true;
-            for (int j = 0; j < tokenLen; ++j)
-            {
-                if (_totlower(text[i + j]) != _totlower(token[j]))
-                {
-                    match = false;
-                    break;
-                }
-            }
-
-            if (match)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    // 攻撃後隙
+    constexpr float kNormalAttackRecoveryDuration = 0.18f;
+    constexpr float kDodgeAttackRecoveryDuration = 0.30f;
 }
 
 // コンストラクタ：初期値設定
@@ -71,15 +41,7 @@ Player::Player()
     , moveSpeed_(4.0f)
     , modelRotationY_(kDefaultRotationY)
     , modelHandle_(-1)
-    , useWalkAnimation_(false)
     , modelLoaded_(false)
-    , totalAnimationCount_(0)
-    , attackAnimIndex_(0)
-    , walkAnimIndex_(1)
-    , idleAnimIndex_(10)
-    , jumpAnimIndex_(9)
-    , dodgeBackAnimIndex_(4)
-    , dodgeForwardAnimIndex_(5)
     , previousMouseInput_(0)
     , comboStep_(0)
     , pendingCombo_(false)
@@ -94,6 +56,11 @@ Player::Player()
     , isGrounded_(true)
     , isAirAttackLocked_(false)
     , airAttackLockPosition_(VGet(0.0f, 0.0f, 0.0f))
+    , canDodgeAttack_(false)
+    , dodgeAttackGraceTimer_(0.0f)
+    , attackRecoveryTimer_(0.0f)
+    , pendingDodgeAttackRecovery_(false)
+    , queuedDodgeAttack_(false)
     , previousKeyInput_(0)
 {
 }
@@ -104,8 +71,7 @@ void Player::Initialize()
     position_ = VGet(0.0f, 0.0f, 0.0f);
     modelRotationY_ = kDefaultRotationY;
     attack_.Initialize();
-    animationController_.Initialize(-1);
-    useWalkAnimation_ = false;
+    playerAnimation_.Initialize();
     comboStep_ = 0;
     pendingCombo_ = false;
     isJumping_ = false;
@@ -119,17 +85,16 @@ void Player::Initialize()
     isGrounded_ = true;
     isAirAttackLocked_ = false;
     airAttackLockPosition_ = VGet(0.0f, 0.0f, 0.0f);
+    canDodgeAttack_ = false;
+    dodgeAttackGraceTimer_ = 0.0f;
+    attackRecoveryTimer_ = 0.0f;
+    pendingDodgeAttackRecovery_ = false;
+    queuedDodgeAttack_ = false;
+    previousMouseInput_ = 0;
     previousKeyInput_ = 0;
-
-    attackAnimIndex_ = 0;
-    walkAnimIndex_ = 1;
-    idleAnimIndex_ = 10;
-    jumpAnimIndex_ = 9;
-    dodgeBackAnimIndex_ = 4;
-    dodgeForwardAnimIndex_ = 5;
 }
 
-// モデル読み込みとアニメーション番号解決
+// モデル読み込み
 bool Player::LoadModel(const TCHAR* modelPath)
 {
     Finalize();
@@ -138,123 +103,23 @@ bool Player::LoadModel(const TCHAR* modelPath)
     if (modelHandle_ < 0)
     {
         modelLoaded_ = false;
-        totalAnimationCount_ = 0;
         return false;
     }
 
-    // モデルに含まれるアニメーション数
-    totalAnimationCount_ = MV1GetAnimNum(modelHandle_);
-
-    // 使用するアニメーション番号を名前から解決
-    attackAnimIndex_ = -1;
-    walkAnimIndex_ = -1;
-    idleAnimIndex_ = -1;
-    jumpAnimIndex_ = -1;
-    dodgeBackAnimIndex_ = -1;
-    dodgeForwardAnimIndex_ = -1;
-
-    int genericDodgeAnimA = -1;
-    int genericDodgeAnimB = -1;
-
-    for (int i = 0; i < totalAnimationCount_; ++i)
+    if (!playerAnimation_.BindModel(modelHandle_))
     {
-        const TCHAR* animName = MV1GetAnimName(modelHandle_, i);
-        if (animName == nullptr)
-        {
-            continue;
-        }
-
-        const bool isGenericDodge = ContainsIgnoreCase(animName, _T("dodge"))
-            || ContainsIgnoreCase(animName, _T("evade"))
-            || ContainsIgnoreCase(animName, _T("dash"))
-            || ContainsIgnoreCase(animName, _T("step"));
-
-        if (isGenericDodge)
-        {
-            if (genericDodgeAnimA < 0)
-            {
-                genericDodgeAnimA = i;
-            }
-            else if (genericDodgeAnimB < 0 && genericDodgeAnimA != i)
-            {
-                genericDodgeAnimB = i;
-            }
-        }
-
-        if (attackAnimIndex_ < 0 && (ContainsIgnoreCase(animName, _T("attack")) || ContainsIgnoreCase(animName, _T("atk")) || ContainsIgnoreCase(animName, _T("slash"))))
-        {
-            attackAnimIndex_ = i;
-        }
-
-        if (walkAnimIndex_ < 0 && (ContainsIgnoreCase(animName, _T("walk")) || ContainsIgnoreCase(animName, _T("run")) || ContainsIgnoreCase(animName, _T("move"))))
-        {
-            walkAnimIndex_ = i;
-        }
-
-        if (idleAnimIndex_ < 0 && (ContainsIgnoreCase(animName, _T("idle")) || ContainsIgnoreCase(animName, _T("wait")) || ContainsIgnoreCase(animName, _T("stand"))))
-        {
-            idleAnimIndex_ = i;
-        }
-
-        if (jumpAnimIndex_ < 0 && (ContainsIgnoreCase(animName, _T("jump")) || ContainsIgnoreCase(animName, _T("air"))))
-        {
-            jumpAnimIndex_ = i;
-        }
-
-        if (dodgeBackAnimIndex_ < 0 && (ContainsIgnoreCase(animName, _T("dodge_back"))
-            || ContainsIgnoreCase(animName, _T("backstep"))
-            || ContainsIgnoreCase(animName, _T("evade_back"))
-            || ContainsIgnoreCase(animName, _T("backward"))
-            || ContainsIgnoreCase(animName, _T("rear"))
-            || ContainsIgnoreCase(animName, _T("retreat"))
-            || ContainsIgnoreCase(animName, _T("back"))))
-        {
-            dodgeBackAnimIndex_ = i;
-        }
-
-        if (dodgeForwardAnimIndex_ < 0 && (ContainsIgnoreCase(animName, _T("dodge_front"))
-            || ContainsIgnoreCase(animName, _T("dodge_forward"))
-            || ContainsIgnoreCase(animName, _T("frontstep"))
-            || ContainsIgnoreCase(animName, _T("forward"))
-            || ContainsIgnoreCase(animName, _T("front"))
-            || ContainsIgnoreCase(animName, _T("rush"))))
-        {
-            dodgeForwardAnimIndex_ = i;
-        }
-    }
-
-    auto isValidIndex = [this](int index) { return index >= 0 && index < totalAnimationCount_; };
-
-    if (!isValidIndex(attackAnimIndex_)) attackAnimIndex_ = isValidIndex(0) ? 0 : -1;
-    if (!isValidIndex(walkAnimIndex_)) walkAnimIndex_ = isValidIndex(1) ? 1 : attackAnimIndex_;
-    if (!isValidIndex(idleAnimIndex_)) idleAnimIndex_ = isValidIndex(kKnownIdleAnimIndex) ? kKnownIdleAnimIndex : walkAnimIndex_;
-    if (!isValidIndex(jumpAnimIndex_)) jumpAnimIndex_ = isValidIndex(kKnownJumpAnimIndex) ? kKnownJumpAnimIndex : idleAnimIndex_;
-    if (!isValidIndex(dodgeBackAnimIndex_)) dodgeBackAnimIndex_ = isValidIndex(kKnownDodgeBackAnimIndex) ? kKnownDodgeBackAnimIndex : idleAnimIndex_;
-    if (!isValidIndex(dodgeForwardAnimIndex_)) dodgeForwardAnimIndex_ = isValidIndex(kKnownDodgeForwardAnimIndex) ? kKnownDodgeForwardAnimIndex : walkAnimIndex_;
-
-    if (isValidIndex(kKnownIdleAnimIndex)) idleAnimIndex_ = kKnownIdleAnimIndex;
-    if (isValidIndex(kKnownJumpAnimIndex)) jumpAnimIndex_ = kKnownJumpAnimIndex;
-    if (isValidIndex(kKnownDodgeBackAnimIndex)) dodgeBackAnimIndex_ = kKnownDodgeBackAnimIndex;
-    if (isValidIndex(kKnownDodgeForwardAnimIndex)) dodgeForwardAnimIndex_ = kKnownDodgeForwardAnimIndex;
-
-    if (dodgeBackAnimIndex_ == dodgeForwardAnimIndex_)
-    {
-        if (isValidIndex(genericDodgeAnimA) && isValidIndex(genericDodgeAnimB) && genericDodgeAnimA != genericDodgeAnimB)
-        {
-            dodgeForwardAnimIndex_ = genericDodgeAnimA;
-            dodgeBackAnimIndex_ = genericDodgeAnimB;
-        }
+        MV1DeleteModel(modelHandle_);
+        modelHandle_ = -1;
+        modelLoaded_ = false;
+        return false;
     }
 
     MV1SetScale(modelHandle_, VGet(kModelScale, kModelScale, kModelScale));
     MV1SetPosition(modelHandle_, position_);
     MV1SetRotationXYZ(modelHandle_, VGet(0.0f, modelRotationY_, 0.0f));
 
-    // アニメーションコントローラーをモデルに接続
-    animationController_.Initialize(modelHandle_);
-
     modelLoaded_ = true;
-    SwitchAnimation(false);
+    playerAnimation_.SwitchAnimation(false, modelLoaded_);
     return true;
 }
 
@@ -265,6 +130,27 @@ void Player::Update(float cameraYaw)
     bool animationUpdatedInAction = false;
     bool airPhysicsApplied = false;
     bool landedThisFrame = false;
+    const bool wasAttackingAtFrameStart = attack_.IsAttacking() || comboStep_ > 0;
+
+    if (attackRecoveryTimer_ > 0.0f)
+    {
+        attackRecoveryTimer_ -= deltaTime;
+        if (attackRecoveryTimer_ < 0.0f)
+        {
+            attackRecoveryTimer_ = 0.0f;
+        }
+    }
+
+    if (canDodgeAttack_)
+    {
+        dodgeAttackGraceTimer_ -= deltaTime;
+        if (dodgeAttackGraceTimer_ <= 0.0f)
+        {
+            canDodgeAttack_ = false;
+            dodgeAttackGraceTimer_ = 0.0f;
+            queuedDodgeAttack_ = false;
+        }
+    }
 
     // カメラ向きに合わせてプレイヤーの向きを更新（回避中は維持）
     if (!isDodging_)
@@ -301,7 +187,8 @@ void Player::Update(float cameraYaw)
     // ジャンプ後半（落下区間）を再生して30F付近で停止
     auto PlayJumpFallHalf = [this]()
     {
-        const float jumpTotal = animationController_.GetAnimTotalTime(jumpAnimIndex_);
+        const int jumpAnimIndex = playerAnimation_.GetJumpAnimIndex();
+        const float jumpTotal = playerAnimation_.GetAnimTotalTime(jumpAnimIndex);
         const float jumpHalf = (jumpTotal > 0.0f) ? (jumpTotal * 0.5f) : 0.0f;
         float fallStop = kJumpFallHoldFrame;
         if (fallStop < jumpHalf)
@@ -314,14 +201,15 @@ void Player::Update(float cameraYaw)
         }
 
         // 落下区間を指定時間で再生
-        animationController_.PlaySegment(jumpAnimIndex_, jumpHalf, fallStop, kJumpFallAnimDuration, false);
+        playerAnimation_.PlaySegment(jumpAnimIndex, jumpHalf, fallStop, kJumpFallAnimDuration, false);
         isFallingAnimActive_ = true;
     };
 
     // 30F保持から着地残りモーションを再生
     auto PlayJumpLandingFromHold = [this]() -> bool
     {
-        const float jumpTotal = animationController_.GetAnimTotalTime(jumpAnimIndex_);
+        const int jumpAnimIndex = playerAnimation_.GetJumpAnimIndex();
+        const float jumpTotal = playerAnimation_.GetAnimTotalTime(jumpAnimIndex);
         const float landingStart = (kJumpFallHoldFrame < jumpTotal) ? kJumpFallHoldFrame : jumpTotal;
         const float landingLength = jumpTotal - landingStart;
         if (landingLength <= 0.0f)
@@ -330,7 +218,7 @@ void Player::Update(float cameraYaw)
         }
 
         // 30Fから終端までを短時間で再生
-        return animationController_.PlaySegment(jumpAnimIndex_, landingStart, jumpTotal, kJumpLandingAnimDuration, false);
+        return playerAnimation_.PlaySegment(jumpAnimIndex, landingStart, jumpTotal, kJumpLandingAnimDuration, false);
     };
 
     // 空中物理（上昇/落下）
@@ -403,14 +291,36 @@ void Player::Update(float cameraYaw)
             {
                 isDodging_ = false;
                 actionTimer_ = 0.0f;
-                if (isGrounded_)
+                canDodgeAttack_ = true;
+                dodgeAttackGraceTimer_ = kDodgeAttackGraceDuration;
+                bool startedDodgeAttack = false;
+
+                if (queuedDodgeAttack_
+                    && attackRecoveryTimer_ <= 0.0f
+                    && !attack_.IsAttacking()
+                    && comboStep_ == 0
+                    && !isJumping_)
                 {
-                    SwitchAnimation(false);
+                    queuedDodgeAttack_ = false;
+                    canDodgeAttack_ = false;
+                    dodgeAttackGraceTimer_ = 0.0f;
+                    pendingCombo_ = false;
+                    isAirAttackLocked_ = false;
+                    pendingDodgeAttackRecovery_ = true;
+
+                    attack_.ExecuteStrongAttack();
+                    playerAnimation_.PlayDodgeAttack();
+                    startedDodgeAttack = true;
+                }
+
+                if (isGrounded_ && !startedDodgeAttack)
+                {
+                    playerAnimation_.SwitchAnimation(false, modelLoaded_);
                 }
             }
         }
 
-        animationController_.Update();
+        playerAnimation_.Update();
         animationUpdatedInAction = true;
 
         // モデル位置の設定
@@ -424,7 +334,6 @@ void Player::Update(float cameraYaw)
             else if (isDodging_)
             {
                 MV1SetRotationXYZ(modelHandle_, VGet(0.0f, modelRotationY_, 0.0f));
-                return;
             }
         }
     }
@@ -467,13 +376,84 @@ void Player::Update(float cameraYaw)
     if (CheckHitKey(KEY_INPUT_S)) currentKeyInput |= 4;
     if (CheckHitKey(KEY_INPUT_A)) currentKeyInput |= 8;
     if (CheckHitKey(KEY_INPUT_D)) currentKeyInput |= 16;
+    if (CheckHitKey(KEY_INPUT_LSHIFT) || CheckHitKey(KEY_INPUT_RSHIFT)) currentKeyInput |= 32;
 
     const bool spacePressed = (currentKeyInput & 1) && !(previousKeyInput_ & 1);
     const bool hasMoveKeyInput = (currentKeyInput & (2 | 4 | 8 | 16)) != 0;
+    const bool shiftPressed = (currentKeyInput & 32) && !(previousKeyInput_ & 32);
+
+    int currentAttackInput = 0;
+    if ((GetMouseInput() & MOUSE_INPUT_LEFT) != 0)
+    {
+        currentAttackInput |= 1;
+    }
+    const bool attackPressed = (currentAttackInput & 1) && !(previousMouseInput_ & 1);
+    const bool attackHeld = (currentAttackInput & 1) != 0;
+
+    const bool shouldTriggerDodgeAttack =
+        canDodgeAttack_
+        && attackHeld
+        && !isDodging_
+        && !attack_.IsAttacking()
+        && comboStep_ == 0
+        && !isJumping_;
+
+    // 攻撃入力とコンボ予約
+    if (shouldTriggerDodgeAttack)
+    {
+        queuedDodgeAttack_ = false;
+        canDodgeAttack_ = false;
+        dodgeAttackGraceTimer_ = 0.0f;
+        pendingCombo_ = false;
+        comboStep_ = 0;
+        isAirAttackLocked_ = false;
+        pendingDodgeAttackRecovery_ = true;
+
+        attack_.ExecuteStrongAttack();
+        playerAnimation_.PlayDodgeAttack();
+    }
+    else if (attackPressed && attackRecoveryTimer_ <= 0.0f)
+    {
+        if (isDodging_)
+        {
+            queuedDodgeAttack_ = true;
+        }
+        else if (!attack_.IsAttacking() && comboStep_ == 0)
+        {
+            pendingDodgeAttackRecovery_ = false;
+            attack_.ExecuteWeakAttack();
+            playerAnimation_.PlayComboSegment(0, isGrounded_, position_, isAirAttackLocked_, airAttackLockPosition_, comboStep_, attack_);
+        }
+        else if (comboStep_ > 0 && comboStep_ <= 2)
+        {
+            pendingCombo_ = true;
+        }
+    }
+
+    // 今フレームで攻撃中かどうかをまとめて判定
+    const bool isAttackAnimating = attack_.IsAttacking() || comboStep_ > 0 || attackPressed;
+
+    // 空中・行動中の微移動
+    {
+        // アクション中でも違和感が出ない範囲で少しだけ移動を許可
+        if (isMoving && !isJumping_ && !isAirAttackLocked_ && (isDodging_ || isAttackAnimating))
+        {
+            move.x /= length;
+            move.z /= length;
+
+            const float actionMoveScale = isDodging_ ? kDodgeMoveScale : kAttackMoveScale;
+            position_.x += move.x * moveSpeed_ * actionMoveScale;
+            position_.z += move.z * moveSpeed_ * actionMoveScale;
+        }
+    }
 
     // Shift単体で後方回避、WASD入力+Shiftで前方回避
-    if (isShiftPressed && !attack_.IsAttacking() && comboStep_ == 0 && isGrounded_)
+    if (shiftPressed && !isDodging_ && !attack_.IsAttacking() && comboStep_ == 0 && isGrounded_ && attackRecoveryTimer_ <= 0.0f)
     {
+        queuedDodgeAttack_ = false;
+        canDodgeAttack_ = false;
+        dodgeAttackGraceTimer_ = 0.0f;
+
         if (hasMoveKeyInput)
         {
             isDodging_ = true;
@@ -493,7 +473,16 @@ void Player::Update(float cameraYaw)
                 MV1SetRotationXYZ(modelHandle_, VGet(0.0f, modelRotationY_, 0.0f));
             }
 
-            PlayActionAnimation(dodgeForwardAnimIndex_, 0.5f);
+            // 回避開始直後の一歩を入れて、ラグ感を減らす
+            if (isMoving)
+            {
+                const float moveX = move.x / length;
+                const float moveZ = move.z / length;
+                position_.x += moveX * moveSpeed_ * (kDodgeMoveScale * 1.2f);
+                position_.z += moveZ * moveSpeed_ * (kDodgeMoveScale * 1.2f);
+            }
+
+            playerAnimation_.PlayActionAnimation(playerAnimation_.GetDodgeForwardAnimIndex(), 0.5f);
 
             previousKeyInput_ = currentKeyInput;
             return;
@@ -509,7 +498,7 @@ void Player::Update(float cameraYaw)
                 MV1SetRotationXYZ(modelHandle_, VGet(0.0f, modelRotationY_, 0.0f));
             }
 
-            PlayActionAnimation(dodgeBackAnimIndex_, 0.5f);
+            playerAnimation_.PlayActionAnimation(playerAnimation_.GetDodgeBackAnimIndex(), 0.5f);
 
             previousKeyInput_ = currentKeyInput;
             return;
@@ -517,7 +506,7 @@ void Player::Update(float cameraYaw)
     }
 
     // ジャンプ開始処理
-    if (spacePressed && !attack_.IsAttacking() && comboStep_ == 0 && isGrounded_)
+    if (spacePressed && !attack_.IsAttacking() && comboStep_ == 0 && isGrounded_ && attackRecoveryTimer_ <= 0.0f)
     {
         isJumping_ = true;
         isGrounded_ = false;
@@ -526,15 +515,16 @@ void Player::Update(float cameraYaw)
         verticalVelocity_ = jumpStartVelocity_;
         jumpHeight_ = 0.0f;
 
-        const float jumpTotal = animationController_.GetAnimTotalTime(jumpAnimIndex_);
+        const int jumpAnimIndex = playerAnimation_.GetJumpAnimIndex();
+        const float jumpTotal = playerAnimation_.GetAnimTotalTime(jumpAnimIndex);
         const float jumpHalf = (jumpTotal > 0.0f) ? (jumpTotal * 0.5f) : 0.0f;
-        animationController_.PlaySegment(jumpAnimIndex_, 0.0f, jumpHalf, kJumpRiseAnimDuration, false);
+        playerAnimation_.PlaySegment(jumpAnimIndex, 0.0f, jumpHalf, kJumpRiseAnimDuration, false);
 
         previousKeyInput_ = currentKeyInput;
     }
 
-    // 地上移動
-    if (isMoving && !isShiftPressed && !isJumping_)
+    // 地上・空中移動
+    if (isMoving && !isShiftPressed && !isDodging_ && !isAttackAnimating && attackRecoveryTimer_ <= 0.0f)
     {
         move.x /= length;
         move.z /= length;
@@ -545,39 +535,18 @@ void Player::Update(float cameraYaw)
         modelRotationY_ = static_cast<float>(std::atan2(move.x, move.z)) + kDefaultRotationY;
     }
 
-    // 攻撃入力とコンボ予約
-    int currentAttackInput = 0;
-    if (CheckHitKey(KEY_INPUT_Q))
-    {
-        currentAttackInput |= 1;
-    }
-
-    const bool attackPressed = (currentAttackInput & 1) && !(previousMouseInput_ & 1);
-
-    if (attackPressed)
-    {
-        if (comboStep_ == 0)
-        {
-            attack_.ExecuteWeakAttack();
-            PlayComboSegment(0);
-        }
-        else if (comboStep_ <= 2)
-        {
-            pendingCombo_ = true;
-        }
-    }
-
     // 非攻撃時の空中アニメ維持 / 地上アニメ復帰
     if (!attack_.IsAttacking() && comboStep_ == 0)
     {
+        const int jumpAnimIndex = playerAnimation_.GetJumpAnimIndex();
         if (!isGrounded_ && !isDodging_)
         {
             if (isFallingAnimActive_
-                && !animationController_.IsPlaying()
-                && animationController_.GetCurrentAnimIndex() == jumpAnimIndex_
+                && !playerAnimation_.IsPlaying()
+                && playerAnimation_.GetCurrentAnimIndex() == jumpAnimIndex
                 && modelHandle_ >= 0)
             {
-                animationController_.SetCurrentTime(kJumpFallHoldFrame);
+                playerAnimation_.SetCurrentTime(kJumpFallHoldFrame);
             }
         }
         else
@@ -591,12 +560,12 @@ void Player::Update(float cameraYaw)
                 else
                 {
                     isFallingAnimActive_ = false;
-                    SwitchAnimation(isMoving);
+                    playerAnimation_.SwitchAnimation(isMoving, modelLoaded_);
                 }
             }
-            else if (!(animationController_.GetCurrentAnimIndex() == jumpAnimIndex_ && animationController_.IsPlaying()))
+            else if (!(playerAnimation_.GetCurrentAnimIndex() == jumpAnimIndex && playerAnimation_.IsPlaying()))
             {
-                SwitchAnimation(isMoving);
+                playerAnimation_.SwitchAnimation(isMoving, modelLoaded_);
             }
         }
     }
@@ -607,10 +576,18 @@ void Player::Update(float cameraYaw)
 
     // サブシステム更新
     attack_.Update();
-    UpdateAttackAnimation();
+    playerAnimation_.UpdateAttackAnimation(modelLoaded_, modelHandle_, position_, isGrounded_, isFallingAnimActive_, isAirAttackLocked_, airAttackLockPosition_, comboStep_, pendingCombo_, attack_);
     if (!animationUpdatedInAction)
     {
-        animationController_.Update();
+        playerAnimation_.Update();
+    }
+
+    // 攻撃後隙タイマー更新
+    const bool isAttackingAfterUpdate = attack_.IsAttacking() || comboStep_ > 0;
+    if (wasAttackingAtFrameStart && !isAttackingAfterUpdate)
+    {
+        attackRecoveryTimer_ = pendingDodgeAttackRecovery_ ? kDodgeAttackRecoveryDuration : kNormalAttackRecoveryDuration;
+        pendingDodgeAttackRecovery_ = false;
     }
 
     // アクション外での空中物理
@@ -640,7 +617,7 @@ void Player::Update(float cameraYaw)
             else
             {
                 isFallingAnimActive_ = false;
-                SwitchAnimation(isMoving);
+                playerAnimation_.SwitchAnimation(isMoving, modelLoaded_);
             }
         }
     }
@@ -649,17 +626,19 @@ void Player::Update(float cameraYaw)
     if (isGrounded_
         && !isFallingAnimActive_
         && !isJumping_
-        && !attack_.IsAttacking() && comboStep_ == 0
-        && animationController_.GetCurrentAnimIndex() == jumpAnimIndex_
-        && !animationController_.IsPlaying())
+        && !attack_.IsAttacking() && comboStep_ == 0)
     {
-        SwitchAnimation(isMoving);
+        const int jumpAnimIndex = playerAnimation_.GetJumpAnimIndex();
+        if (playerAnimation_.GetCurrentAnimIndex() == jumpAnimIndex
+            && !playerAnimation_.IsPlaying())
+        {
+            playerAnimation_.SwitchAnimation(isMoving, modelLoaded_);
+        }
     }
 
     // ルートモーションと物理座標の同期
     if (modelHandle_ >= 0)
     {
-        const bool isAttackAnimating = attack_.IsAttacking() || comboStep_ > 0;
         if (isAttackAnimating)
         {
             if (isAirAttackLocked_)
@@ -669,20 +648,12 @@ void Player::Update(float cameraYaw)
             }
             else
             {
-                VECTOR modelPos = MV1GetPosition(modelHandle_);
-                position_.x = modelPos.x;
-                position_.z = modelPos.z;
-
                 if (isGrounded_)
                 {
-                    position_.y = modelPos.y;
                     ClampToGround();
                 }
-                else
-                {
-                    modelPos.y = position_.y;
-                    MV1SetPosition(modelHandle_, modelPos);
-                }
+
+                MV1SetPosition(modelHandle_, position_);
             }
         }
         else
@@ -712,7 +683,7 @@ void Player::Draw() const
 // 終了処理
 void Player::Finalize()
 {
-    animationController_.Finalize();
+    playerAnimation_.Finalize();
 
     if (modelHandle_ >= 0)
     {
@@ -721,7 +692,6 @@ void Player::Finalize()
     }
 
     modelLoaded_ = false;
-    useWalkAnimation_ = false;
     attack_.Finalize();
 }
 
@@ -741,120 +711,4 @@ AttackType Player::GetCurrentAttack() const
 bool Player::IsAttacking() const
 {
     return attack_.IsAttacking();
-}
-
-// 待機/移動アニメ切り替え
-void Player::SwitchAnimation(bool useWalkAnimation)
-{
-    if (!modelLoaded_)
-    {
-        return;
-    }
-
-    if (useWalkAnimation_ == useWalkAnimation && animationController_.IsPlaying())
-    {
-        return;
-    }
-
-    useWalkAnimation_ = useWalkAnimation;
-
-    // 待機と移動の目標時間をここで統一管理
-    const int animIndex = useWalkAnimation_ ? walkAnimIndex_ : idleAnimIndex_;
-    const float targetDuration = useWalkAnimation_ ? 1.5f : 4.0f;
-
-    animationController_.PlayLoop(animIndex, targetDuration);
-}
-
-// 攻撃コンボアニメ更新
-void Player::UpdateAttackAnimation()
-{
-    if (!modelLoaded_ || comboStep_ == 0)
-    {
-        return;
-    }
-
-    // 現在のセグメントが終了したか確認
-    if (!animationController_.IsPlaying())
-    {
-        if (pendingCombo_ && comboStep_ < 3)
-        {
-            // 次のコンボ段へ
-            pendingCombo_ = false;
-            PlayComboSegment(comboStep_);
-        }
-        else
-        {
-            // コンボ終了時は空中固定を解除
-            if (modelHandle_ >= 0)
-            {
-                position_ = MV1GetPosition(modelHandle_);
-            }
-            comboStep_ = 0;
-            pendingCombo_ = false;
-            attack_.CancelAttack();
-            isAirAttackLocked_ = false;
-
-            // 空中コンボ後は落下アニメを強制せず、状態に応じて遷移
-            if (isGrounded_)
-            {
-                isFallingAnimActive_ = false;
-                SwitchAnimation(false);
-            }
-            else
-            {
-                isFallingAnimActive_ = false;
-            }
-        }
-    }
-}
-
-// コンボ段の再生区間設定
-void Player::PlayComboSegment(int step)
-{
-    // 空中攻撃は各段の開始位置を固定し、段中は落下しないようにする
-    if (!isGrounded_)
-    {
-        isAirAttackLocked_ = true;
-        airAttackLockPosition_ = position_;
-    }
-    else
-    {
-        isAirAttackLocked_ = false;
-    }
-
-    float start = 0.0f;
-    float end = 0.0f;
-    float targetDuration = 0.5f;
-
-    if (step == 0)
-    {
-        start = 0.0f;
-        end = 35.0f;
-        targetDuration = 0.5f;
-    }
-    else if (step == 1)
-    {
-        start = 35.0f;
-        end = 45.0f;
-        targetDuration = 0.25f;
-    }
-    else if (step == 2)
-    {
-        start = 45.0f;
-        end = 105.0f;
-        targetDuration = 0.7f;
-    }
-
-    // コンボ段の区間を指定時間で再生
-    animationController_.PlaySegment(attackAnimIndex_, start, end, targetDuration, false);
-    comboStep_ = step + 1;
-
-    attack_.ExecuteWeakAttack();
-}
-
-// 単発アクション再生
-void Player::PlayActionAnimation(int animIndex, float duration)
-{
-    // 単発アクションは全体を指定時間で1回再生
-    animationController_.PlayOneShot(animIndex, duration);
 }

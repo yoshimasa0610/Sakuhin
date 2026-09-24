@@ -68,13 +68,32 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     constexpr float kCameraDistance = 520.0f;
     constexpr float kCameraYawSpeed = 0.035f;
     constexpr float kCameraPitchSpeed = 0.015f;
+    constexpr float kMouseYawSensitivity = 0.0032f;
+    constexpr float kMousePitchSensitivity = 0.0022f;
     constexpr float kCameraTargetHeight = 120.0f;
     constexpr float kCameraMinPitch = 0.20f;
     constexpr float kCameraMaxPitch = 1.20f;
 
+    int prevMouseX = 0;
+    int prevMouseY = 0;
+    GetMousePoint(&prevMouseX, &prevMouseY);
+
     // メインループ
     while (ProcessMessage() == 0 && CheckHitKey(KEY_INPUT_ESCAPE) == 0)
     {
+        int mouseX = 0;
+        int mouseY = 0;
+        GetMousePoint(&mouseX, &mouseY);
+
+        const int mouseDeltaX = mouseX - prevMouseX;
+        const int mouseDeltaY = mouseY - prevMouseY;
+
+        cameraYaw += static_cast<float>(mouseDeltaX) * kMouseYawSensitivity;
+        cameraPitch += static_cast<float>(mouseDeltaY) * kMousePitchSensitivity;
+
+        prevMouseX = mouseX;
+        prevMouseY = mouseY;
+
         // 矢印キーでカメラ角度を更新
         if (CheckHitKey(KEY_INPUT_LEFT)) cameraYaw -= kCameraYawSpeed;
         if (CheckHitKey(KEY_INPUT_RIGHT)) cameraYaw += kCameraYawSpeed;

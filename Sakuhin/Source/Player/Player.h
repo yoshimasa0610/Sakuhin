@@ -1,8 +1,9 @@
 ﻿#pragma once
 
 #include <DxLib.h>
+
 #include "PlayerAttack.h"
-#include "AnimationController.h"
+#include "PlayerAnimation.h"
 
 // プレイヤー本体クラス
 // 入力・移動・重力・ジャンプ・回避・攻撃アニメ連携を管理する
@@ -14,7 +15,7 @@ public:
     // 初期化
     void Initialize();
 
-    // モデル読み込みと使用アニメーション解決
+    // モデル読み込み
     bool LoadModel(const TCHAR* modelPath);
 
     // フレーム更新（cameraYaw はカメラの水平角）
@@ -36,45 +37,20 @@ public:
     bool IsAttacking() const;
 
 private:
-    // 待機 / 移動のループアニメ切り替え
-    void SwitchAnimation(bool useWalkAnimation);
-
-    // コンボ攻撃アニメ進行の更新
-    void UpdateAttackAnimation();
-
-    // コンボ段ごとの再生区間を設定して再生
-    void PlayComboSegment(int step);
-
-    // 単発アクションアニメを指定時間で再生
-    void PlayActionAnimation(int animIndex, float duration);
-
-private:
-    // 基本移動情報
+    // 基本座標・移動速度・見た目向き
     VECTOR position_;
     float moveSpeed_;
     float modelRotationY_;
 
-    // モデルと状態
+    // 3Dモデルハンドルと読み込み状態
     int modelHandle_;
-    bool useWalkAnimation_;
-
-    // 読み込み済みモデル情報
     bool modelLoaded_;
-    int totalAnimationCount_;
 
-    // 使用アニメーション番号
-    int attackAnimIndex_;
-    int walkAnimIndex_;
-    int idleAnimIndex_;
-    int jumpAnimIndex_;
-    int dodgeBackAnimIndex_;
-    int dodgeForwardAnimIndex_;
-
-    // コンボ状態
+    // 通常攻撃コンボ状態
     int comboStep_;
     bool pendingCombo_;
 
-    // 空中 / 回避 / 物理状態
+    // ジャンプ / 回避 / 落下アニメ / 物理
     bool isJumping_;
     bool isDodging_;
     bool isFallingAnimActive_;
@@ -85,15 +61,26 @@ private:
     float jumpStartVelocity_;
     bool isGrounded_;
 
-    // 空中攻撃中の位置固定状態
+    // 空中攻撃時の位置固定
     bool isAirAttackLocked_;
     VECTOR airAttackLockPosition_;
 
-    // サブシステム
-    Attack attack_;
-    AnimationController animationController_;
+    // 回避終了後の回避攻撃受付（猶予）
+    bool canDodgeAttack_;
+    float dodgeAttackGraceTimer_;
 
-    // 入力の前フレーム値（押下瞬間判定用）
+    // 攻撃後隙管理と回避攻撃後隙の切替フラグ
+    float attackRecoveryTimer_;
+    bool pendingDodgeAttackRecovery_;
+
+    // 回避中に入れた攻撃の先行入力バッファ
+    bool queuedDodgeAttack_;
+
+    // 攻撃状態管理とアニメ管理
+    Attack attack_;
+    PlayerAnimation playerAnimation_;
+
+    // 前フレーム入力（押下瞬間判定用）
     int previousMouseInput_;
     int previousKeyInput_;
 };
