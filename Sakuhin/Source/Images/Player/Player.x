@@ -5,7 +5,7 @@ Material Paladin_MAT {
 	0.500000;0.500000;0.500000;;
 	1.000000;1.000000;1.000000;;
 	TextureFilename {
-		"..\..\..\..\..\..\..\Downloads\untitled.fbm\Paladin_diffuse.png";
+		"Paladin_diffuse.png";
 	}
 }
 Material Paladin_MAT.003 {
@@ -14,7 +14,7 @@ Material Paladin_MAT.003 {
 	0.500000;0.500000;0.500000;;
 	0.998169;0.908081;0.908081;;
 	TextureFilename {
-		"..\..\..\..\..\..\..\Downloads\untitled.fbm\Paladin_diffuse.png";
+		"Paladin_diffuse.png";
 	}
 }
 Material NoMaterial {
@@ -694,7 +694,7 @@ Frame Armature {
 										-0.248087,-0.875410,0.414862,0.000000,
 										-0.000000,21.603392,0.000001,1.000000;;
 									}
-									Frame —§•û‘Ì {
+									Frame ç«‹æ–¹ä½“ {
 										FrameTransformMatrix {
 											21.740278,-7.367122,97.329880,0.000000,
 											-93.671814,-29.607275,18.682144,0.000000,
@@ -573111,3 +573111,4 @@ AnimationSet Armature|mixamo.com.007 {
 		}
 	}
 }
+

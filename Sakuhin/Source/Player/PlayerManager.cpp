@@ -26,7 +26,11 @@ void PlayerManager::Initialize()
     {
         _T("Source/Images/Player/Player.x"),
         _T("../Source/Images/Player/Player.x"),
-        _T("../../Source/Images/Player/Player.x")
+        _T("../../Source/Images/Player/Player.x"),
+        // .x が読み込めない環境向けのフォールバック
+        _T("Source/Images/Player/Player.fbx"),
+        _T("../Source/Images/Player/Player.fbx"),
+        _T("../../Source/Images/Player/Player.fbx")
     };
 
     for (const auto& path : relativeCandidates)
@@ -56,6 +60,12 @@ void PlayerManager::Initialize()
 
     TCHAR absolutePath[MAX_PATH] = { 0 };
     _stprintf_s(absolutePath, _T("%s\\..\\..\\Source\\Images\\Player\\Player.x"), exePath);
+
+    if (!FileExists(absolutePath))
+    {
+        // .x が見つからない場合は .fbx も試す
+        _stprintf_s(absolutePath, _T("%s\\..\\..\\Source\\Images\\Player\\Player.fbx"), exePath);
+    }
 
     if (!FileExists(absolutePath))
     {
@@ -94,16 +104,52 @@ VECTOR PlayerManager::GetPlayerPosition() const
     return player_.GetPosition();
 }
 
+// プレイヤー前方向取得
+VECTOR PlayerManager::GetPlayerFacingDirection() const
+{
+    return player_.GetFacingDirection();
+}
+
 // 攻撃種別取得
 AttackType PlayerManager::GetPlayerCurrentAttack() const
 {
     return player_.GetCurrentAttack();
 }
 
+// コンボ段取得
+int PlayerManager::GetPlayerComboStep() const
+{
+    return player_.GetComboStep();
+}
+
+// 攻撃判定有効状態取得
+bool PlayerManager::IsPlayerAttackHitboxActive() const
+{
+    return player_.IsAttackHitboxActive();
+}
+
+// エリアル始動攻撃中判定取得
+bool PlayerManager::IsPlayerAerialStarterAttackActive() const
+{
+    return player_.IsAerialStarterAttackActive();
+}
+
+// 攻撃経過時間取得
+float PlayerManager::GetPlayerAttackElapsedTime() const
+{
+    return player_.GetAttackElapsedTime();
+}
+
 // 攻撃中判定
 bool PlayerManager::IsPlayerAttacking() const
 {
     return player_.IsAttacking();
+}
+
+// 敵打ち上げ後の追従ジャンプ適用
+void PlayerManager::ApplyAerialFollowJump(float targetY)
+{
+    player_.StartAerialFollowJump(targetY);
 }
 
 // モデル読み込み成否

@@ -22,9 +22,19 @@ public:
     // プレイヤー位置
     VECTOR GetPlayerPosition() const;
 
+    // プレイヤーの前方向（攻撃判定生成用）
+    VECTOR GetPlayerFacingDirection() const;
+
     // プレイヤー攻撃状態
     AttackType GetPlayerCurrentAttack() const;
+    int GetPlayerComboStep() const;
+    bool IsPlayerAttackHitboxActive() const;
+    bool IsPlayerAerialStarterAttackActive() const;
+    float GetPlayerAttackElapsedTime() const;
     bool IsPlayerAttacking() const;
+
+    // 敵打ち上げ後の追従ジャンプをプレイヤーへ適用
+    void ApplyAerialFollowJump(float targetY);
 
     // モデル読み込み状態
     bool IsPlayerModelLoaded() const;

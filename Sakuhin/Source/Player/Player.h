@@ -30,8 +30,26 @@ public:
     // 現在位置の取得
     VECTOR GetPosition() const;
 
+    // 見た目の向き（水平前方向ベクトル）を取得
+    VECTOR GetFacingDirection() const;
+
     // 現在攻撃状態の取得
     AttackType GetCurrentAttack() const;
+
+    // 現在のコンボ段（0:なし / 1..3:各段）
+    int GetComboStep() const;
+
+    // 攻撃判定を出してよいタイミングか
+    bool IsAttackHitboxActive() const;
+
+    // エリアル始動攻撃（長押し始動1段目）中か
+    bool IsAerialStarterAttackActive() const;
+
+    // 敵打ち上げ後、指定高度へジャンプ追従させる
+    void StartAerialFollowJump(float targetY);
+
+    // 攻撃経過時間（コンボ段の切り替わり検出用）
+    float GetAttackElapsedTime() const;
 
     // 攻撃中かどうか
     bool IsAttacking() const;
@@ -75,6 +93,23 @@ private:
 
     // 回避中に入れた攻撃の先行入力バッファ
     bool queuedDodgeAttack_;
+
+    // 左クリック長押しエリアル始動管理
+    float attackHoldTimer_;
+    bool wasAttackHeld_;
+    bool longPressAttackTriggered_;
+    bool isAerialStarterAttack_;
+
+    // 敵打ち上げ追従ジャンプ管理
+    bool isFollowingAerialTarget_;
+    float aerialTargetY_;
+
+    // ヒット判定タイミング管理（コンボ段ごとの経過時間）
+    float comboStepElapsedTime_;
+    int prevComboStepForHitbox_;
+
+    // 空中攻撃時のふわふわ上昇トリガー用
+    int prevComboStepForAirFloat_;
 
     // 攻撃状態管理とアニメ管理
     Attack attack_;

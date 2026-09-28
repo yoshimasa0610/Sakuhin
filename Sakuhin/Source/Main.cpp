@@ -106,7 +106,20 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 
         // 更新
         playerManager.Update(cameraYaw);
-        enemyManager.Update();
+        enemyManager.Update(
+            playerManager.GetPlayerPosition(),
+            playerManager.GetPlayerFacingDirection(),
+            playerManager.GetPlayerCurrentAttack(),
+            playerManager.GetPlayerComboStep(),
+            playerManager.IsPlayerAttackHitboxActive(),
+            playerManager.IsPlayerAttacking(),
+            playerManager.IsPlayerAerialStarterAttackActive());
+
+        float aerialFollowTargetY = 0.0f;
+        if (enemyManager.ConsumeAerialFollowJumpRequest(aerialFollowTargetY))
+        {
+            playerManager.ApplyAerialFollowJump(aerialFollowTargetY);
+        }
 
         // カメラ目標位置（プレイヤー中心）
         const VECTOR playerPos = playerManager.GetPlayerPosition();

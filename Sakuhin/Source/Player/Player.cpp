@@ -17,7 +17,7 @@ namespace
     constexpr float kFloorMaxZ = 3000.0f;
 
     // 空中挙動
-    constexpr float kFallingGravityScale = 0.15f;
+    constexpr float kFallingGravityScale = 0.30f;
     constexpr float kJumpRiseAnimDuration = 0.35f;
     constexpr float kJumpFallAnimDuration = 0.70f;
     constexpr float kJumpLandingAnimDuration = 0.20f;
@@ -33,6 +33,17 @@ namespace
     // 攻撃後隙
     constexpr float kNormalAttackRecoveryDuration = 0.18f;
     constexpr float kDodgeAttackRecoveryDuration = 0.30f;
+
+    // 三段目コンボの当たり判定遅延（3段目再生中に確実に当たり判定が出る値）
+    constexpr float kThirdComboHitDelay = 0.50f;
+
+    // 左クリック長押しでエリアル始動攻撃を出す閾値
+    constexpr float kAerialStarterHoldThreshold = 0.30f;
+
+    // 空中攻撃時のふわふわ挙動
+    constexpr float kAirAttackRiseGravityScale = 0.42f;
+    constexpr float kAirAttackFallGravityScale = 0.12f;
+    constexpr float kAirAttackLiftVelocity = 180.0f;
 }
 
 // コンストラクタ：初期値設定
@@ -61,6 +72,15 @@ Player::Player()
     , attackRecoveryTimer_(0.0f)
     , pendingDodgeAttackRecovery_(false)
     , queuedDodgeAttack_(false)
+    , attackHoldTimer_(0.0f)
+    , wasAttackHeld_(false)
+    , longPressAttackTriggered_(false)
+    , isAerialStarterAttack_(false)
+    , isFollowingAerialTarget_(false)
+    , aerialTargetY_(0.0f)
+    , comboStepElapsedTime_(0.0f)
+    , prevComboStepForHitbox_(0)
+    , prevComboStepForAirFloat_(0)
     , previousKeyInput_(0)
 {
 }
@@ -90,6 +110,15 @@ void Player::Initialize()
     attackRecoveryTimer_ = 0.0f;
     pendingDodgeAttackRecovery_ = false;
     queuedDodgeAttack_ = false;
+    attackHoldTimer_ = 0.0f;
+    wasAttackHeld_ = false;
+    longPressAttackTriggered_ = false;
+    isAerialStarterAttack_ = false;
+    isFollowingAerialTarget_ = false;
+    aerialTargetY_ = 0.0f;
+    comboStepElapsedTime_ = 0.0f;
+    prevComboStepForHitbox_ = 0;
+    prevComboStepForAirFloat_ = 0;
     previousMouseInput_ = 0;
     previousKeyInput_ = 0;
 }
@@ -118,6 +147,49 @@ bool Player::LoadModel(const TCHAR* modelPath)
     MV1SetPosition(modelHandle_, position_);
     MV1SetRotationXYZ(modelHandle_, VGet(0.0f, modelRotationY_, 0.0f));
 
+    // ヘルメット貫通対策：頭部に関連するフレームを非表示化する
+    // ※ 立方体/白板はゲーム内で使うため、ここでは非表示にしない
+    {
+        const TCHAR* hiddenHeadFrameCandidates[] =
+        {
+            _T("mixamorig_Head"),
+            _T("mixamorig_Neck"),
+            _T("mixamorig_LeftEye"),
+            _T("mixamorig_RightEye"),
+            _T("mixamorig_HeadTop_End"),
+            _T("Head"),
+            _T("head")
+        };
+
+        for (const auto& frameName : hiddenHeadFrameCandidates)
+        {
+            const int frameIndex = MV1SearchFrame(modelHandle_, frameName);
+            if (frameIndex >= 0)
+            {
+                MV1SetFrameVisible(modelHandle_, frameIndex, FALSE);
+            }
+        }
+    }
+
+    // Blender から混入した不要オブジェクト(白い板)を非表示化する
+    {
+        const TCHAR* hiddenFrameCandidates[] =
+        {
+            _T("立方体"),
+            _T("Cube"),
+            _T("Cube.001")
+        };
+
+        for (const auto& frameName : hiddenFrameCandidates)
+        {
+            const int frameIndex = MV1SearchFrame(modelHandle_, frameName);
+            if (frameIndex >= 0)
+            {
+                MV1SetFrameVisible(modelHandle_, frameIndex, FALSE);
+            }
+        }
+    }
+
     modelLoaded_ = true;
     playerAnimation_.SwitchAnimation(false, modelLoaded_);
     return true;
@@ -131,6 +203,39 @@ void Player::Update(float cameraYaw)
     bool airPhysicsApplied = false;
     bool landedThisFrame = false;
     const bool wasAttackingAtFrameStart = attack_.IsAttacking() || comboStep_ > 0;
+
+    // コンボ段ごとの経過時間を更新（段が変わったら0に戻す）
+    if (comboStep_ > 0)
+    {
+        if (prevComboStepForHitbox_ != comboStep_)
+        {
+            prevComboStepForHitbox_ = comboStep_;
+            comboStepElapsedTime_ = 0.0f;
+        }
+        else
+        {
+            comboStepElapsedTime_ += deltaTime;
+        }
+    }
+    else
+    {
+        prevComboStepForHitbox_ = 0;
+        comboStepElapsedTime_ = 0.0f;
+    }
+
+    // 空中コンボ段が進むたびに少し浮き上がる
+    if (!isGrounded_ && comboStep_ > 0)
+    {
+        if (prevComboStepForAirFloat_ != comboStep_)
+        {
+            verticalVelocity_ = kAirAttackLiftVelocity;
+            prevComboStepForAirFloat_ = comboStep_;
+        }
+    }
+    else
+    {
+        prevComboStepForAirFloat_ = 0;
+    }
 
     if (attackRecoveryTimer_ > 0.0f)
     {
@@ -247,16 +352,42 @@ void Player::Update(float cameraYaw)
 
         if (isJumping_)
         {
-            // 空中攻撃中は位置固定し、落下させない
+            // 空中攻撃中は水平位置を固定しつつ、ふわふわ落下させる
             if (isAirAttackLocked_)
             {
-                verticalVelocity_ = 0.0f;
-                position_ = airAttackLockPosition_;
+                position_.x = airAttackLockPosition_.x;
+                position_.z = airAttackLockPosition_.z;
+
+                const float gravityScale = (verticalVelocity_ < 0.0f)
+                    ? kAirAttackFallGravityScale
+                    : kAirAttackRiseGravityScale;
+                verticalVelocity_ += gravity_ * gravityScale * deltaTime;
+                position_.y += verticalVelocity_ * deltaTime;
+
+                ClampToGround();
+                if (isGrounded_)
+                {
+                    isAirAttackLocked_ = false;
+                }
+                else
+                {
+                    airAttackLockPosition_.y = position_.y;
+                }
+
+                airPhysicsApplied = true;
             }
             else
             {
                 ApplyAirPhysics();
                 airPhysicsApplied = true;
+
+                // エリアル追従ジャンプ中は目標高度まで到達したら上昇を止める
+                if (isFollowingAerialTarget_ && position_.y >= aerialTargetY_)
+                {
+                    position_.y = aerialTargetY_;
+                    verticalVelocity_ = 0.0f;
+                    isFollowingAerialTarget_ = false;
+                }
 
                 // 落下アニメは非攻撃時のみ開始する
                 if (!isGrounded_
@@ -274,6 +405,7 @@ void Player::Update(float cameraYaw)
                 if (isGrounded_)
                 {
                     actionTimer_ = 0.0f;
+                    isFollowingAerialTarget_ = false;
                 }
             }
         }
@@ -389,6 +521,18 @@ void Player::Update(float cameraYaw)
     }
     const bool attackPressed = (currentAttackInput & 1) && !(previousMouseInput_ & 1);
     const bool attackHeld = (currentAttackInput & 1) != 0;
+    const bool attackReleased = !(currentAttackInput & 1) && (previousMouseInput_ & 1);
+
+    // 左クリック長押し時間を計測（エリアル始動判定に使用）
+    if (attackHeld)
+    {
+        if (!wasAttackHeld_)
+        {
+            attackHoldTimer_ = 0.0f;
+            longPressAttackTriggered_ = false;
+        }
+        attackHoldTimer_ += deltaTime;
+    }
 
     const bool shouldTriggerDodgeAttack =
         canDodgeAttack_
@@ -397,6 +541,28 @@ void Player::Update(float cameraYaw)
         && !attack_.IsAttacking()
         && comboStep_ == 0
         && !isJumping_;
+
+    // 長押しエリアル始動攻撃（1段目のみ）
+    const bool canStartAerialStarter =
+        attackHeld
+        && !longPressAttackTriggered_
+        && attackHoldTimer_ >= kAerialStarterHoldThreshold
+        && !isDodging_
+        && !attack_.IsAttacking()
+        && comboStep_ == 0
+        && isGrounded_
+        && attackRecoveryTimer_ <= 0.0f;
+
+    // 短押し（閾値未満で離した）で通常1段目を開始
+    const bool shouldStartNormalComboFromShortClick =
+        attackReleased
+        && !longPressAttackTriggered_
+        && attackHoldTimer_ > 0.0f
+        && attackHoldTimer_ < kAerialStarterHoldThreshold
+        && !isDodging_
+        && !attack_.IsAttacking()
+        && comboStep_ == 0
+        && attackRecoveryTimer_ <= 0.0f;
 
     // 攻撃入力とコンボ予約
     if (shouldTriggerDodgeAttack)
@@ -408,9 +574,25 @@ void Player::Update(float cameraYaw)
         comboStep_ = 0;
         isAirAttackLocked_ = false;
         pendingDodgeAttackRecovery_ = true;
+        isAerialStarterAttack_ = false;
 
         attack_.ExecuteStrongAttack();
         playerAnimation_.PlayDodgeAttack();
+    }
+    else if (canStartAerialStarter)
+    {
+        // 左クリック長押し: コンボ1段目のみを始動（エリアル打ち上げ用）
+        pendingDodgeAttackRecovery_ = false;
+        isAerialStarterAttack_ = true;
+        longPressAttackTriggered_ = true;
+
+        attack_.ExecuteWeakAttack();
+        playerAnimation_.PlayComboSegment(0, isGrounded_, position_, isAirAttackLocked_, airAttackLockPosition_, comboStep_, attack_);
+
+        if (!isGrounded_)
+        {
+            verticalVelocity_ = kAirAttackLiftVelocity;
+        }
     }
     else if (attackPressed && attackRecoveryTimer_ <= 0.0f)
     {
@@ -418,17 +600,31 @@ void Player::Update(float cameraYaw)
         {
             queuedDodgeAttack_ = true;
         }
-        else if (!attack_.IsAttacking() && comboStep_ == 0)
-        {
-            pendingDodgeAttackRecovery_ = false;
-            attack_.ExecuteWeakAttack();
-            playerAnimation_.PlayComboSegment(0, isGrounded_, position_, isAirAttackLocked_, airAttackLockPosition_, comboStep_, attack_);
-        }
         else if (comboStep_ > 0 && comboStep_ <= 2)
         {
             pendingCombo_ = true;
         }
     }
+    else if (shouldStartNormalComboFromShortClick)
+    {
+        pendingDodgeAttackRecovery_ = false;
+        isAerialStarterAttack_ = false;
+        attack_.ExecuteWeakAttack();
+        playerAnimation_.PlayComboSegment(0, isGrounded_, position_, isAirAttackLocked_, airAttackLockPosition_, comboStep_, attack_);
+
+        if (!isGrounded_)
+        {
+            verticalVelocity_ = kAirAttackLiftVelocity;
+        }
+    }
+
+    if (!attackHeld)
+    {
+        attackHoldTimer_ = 0.0f;
+        longPressAttackTriggered_ = false;
+    }
+
+    wasAttackHeld_ = attackHeld;
 
     // 今フレームで攻撃中かどうかをまとめて判定
     const bool isAttackAnimating = attack_.IsAttacking() || comboStep_ > 0 || attackPressed;
@@ -582,6 +778,16 @@ void Player::Update(float cameraYaw)
         playerAnimation_.Update();
     }
 
+    // エリアル始動フラグは1段目中のみ保持する
+    if (isAerialStarterAttack_ && comboStep_ != 1)
+    {
+        isAerialStarterAttack_ = false;
+    }
+    if (!attack_.IsAttacking() && comboStep_ == 0)
+    {
+        isAerialStarterAttack_ = false;
+    }
+
     // 攻撃後隙タイマー更新
     const bool isAttackingAfterUpdate = attack_.IsAttacking() || comboStep_ > 0;
     if (wasAttackingAtFrameStart && !isAttackingAfterUpdate)
@@ -600,8 +806,24 @@ void Player::Update(float cameraYaw)
         }
         else
         {
-            verticalVelocity_ = 0.0f;
-            position_ = airAttackLockPosition_;
+            position_.x = airAttackLockPosition_.x;
+            position_.z = airAttackLockPosition_.z;
+
+            const float gravityScale = (verticalVelocity_ < 0.0f)
+                ? kAirAttackFallGravityScale
+                : kAirAttackRiseGravityScale;
+            verticalVelocity_ += gravity_ * gravityScale * deltaTime;
+            position_.y += verticalVelocity_ * deltaTime;
+
+            ClampToGround();
+            if (isGrounded_)
+            {
+                isAirAttackLocked_ = false;
+            }
+            else
+            {
+                airAttackLockPosition_.y = position_.y;
+            }
         }
     }
 
@@ -643,8 +865,10 @@ void Player::Update(float cameraYaw)
         {
             if (isAirAttackLocked_)
             {
-                position_ = airAttackLockPosition_;
-                MV1SetPosition(modelHandle_, airAttackLockPosition_);
+                position_.x = airAttackLockPosition_.x;
+                position_.z = airAttackLockPosition_.z;
+                airAttackLockPosition_.y = position_.y;
+                MV1SetPosition(modelHandle_, position_);
             }
             else
             {
@@ -701,10 +925,87 @@ VECTOR Player::GetPosition() const
     return position_;
 }
 
+// 見た目の向き取得（水平前方向）
+VECTOR Player::GetFacingDirection() const
+{
+    // modelRotationY_ は描画都合で +PI オフセットしているため戻して使う
+    const float worldYaw = modelRotationY_ - kDefaultRotationY;
+    return VGet(std::sin(worldYaw), 0.0f, std::cos(worldYaw));
+}
+
 // 攻撃状態取得
 AttackType Player::GetCurrentAttack() const
 {
     return attack_.GetCurrentAttack();
+}
+
+// 現在コンボ段取得
+int Player::GetComboStep() const
+{
+    return comboStep_;
+}
+
+// 攻撃判定有効タイミング判定
+bool Player::IsAttackHitboxActive() const
+{
+    // コンボ段が無いときは判定無し
+    if (comboStep_ <= 0)
+    {
+        return false;
+    }
+
+    // 三段目だけ少し遅れて判定を有効化する
+    if (comboStep_ == 3 && comboStepElapsedTime_ < kThirdComboHitDelay)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+// エリアル始動攻撃中判定
+bool Player::IsAerialStarterAttackActive() const
+{
+    return isAerialStarterAttack_ && comboStep_ == 1 && attack_.IsAttacking();
+}
+
+// 敵打ち上げ後の高度へ追従ジャンプ開始
+void Player::StartAerialFollowJump(float targetY)
+{
+    if (targetY <= position_.y + 1.0f)
+    {
+        return;
+    }
+
+    // ジャンプ上昇モーションを開始
+    isJumping_ = true;
+    isGrounded_ = false;
+    isFallingAnimActive_ = false;
+    actionTimer_ = 0.0f;
+
+    // 目標高度まで届く上昇速度を計算（v^2 = 2gh）
+    const float riseDistance = targetY - position_.y;
+    const float g = -gravity_;
+    float launchVelocity = (g > 0.0f) ? std::sqrt(2.0f * g * riseDistance) : jumpStartVelocity_;
+    if (launchVelocity < jumpStartVelocity_)
+    {
+        launchVelocity = jumpStartVelocity_;
+    }
+
+    verticalVelocity_ = launchVelocity;
+    isFollowingAerialTarget_ = true;
+    aerialTargetY_ = targetY;
+
+    const int jumpAnimIndex = playerAnimation_.GetJumpAnimIndex();
+    const float jumpTotal = playerAnimation_.GetAnimTotalTime(jumpAnimIndex);
+    const float jumpHalf = (jumpTotal > 0.0f) ? (jumpTotal * 0.5f) : 0.0f;
+    playerAnimation_.PlaySegment(jumpAnimIndex, 0.0f, jumpHalf, kJumpRiseAnimDuration, false);
+}
+
+// 攻撃経過時間取得
+float Player::GetAttackElapsedTime() const
+{
+    return attack_.GetAttackDuration();
 }
 
 // 攻撃中判定
