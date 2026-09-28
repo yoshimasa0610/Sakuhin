@@ -15,9 +15,9 @@ namespace
 
     constexpr float kEnemyGravityScale = 0.30f;
     constexpr float kEnemyHitFloatDuration = 0.24f;
-    constexpr float kEnemyHitLiftVelocity = 150.0f;
-    constexpr float kEnemyHitRiseGravityScale = 0.40f;
-    constexpr float kEnemyHitFallGravityScale = 0.10f;
+    constexpr float kEnemyHitLiftVelocity = 82.0f;
+    constexpr float kEnemyHitRiseGravityScale = 0.68f;
+    constexpr float kEnemyHitFallGravityScale = 0.24f;
 }
 
 // èâä˙èÛë‘Ç…ñﬂÇ∑
@@ -232,6 +232,35 @@ void Enemy::LaunchToHeight(float targetY)
     verticalVelocity_ = 0.0f;
     hitFloatTimer_ = kEnemyHitFloatDuration;
     isGrounded_ = (position_.y <= kGroundY);
+    MV1SetPosition(modelHandle_, position_);
+    UpdateColliderWorldPositions();
+}
+
+void Enemy::MoveToPosition(const VECTOR& targetPosition)
+{
+    if (!modelLoaded_ || modelHandle_ < 0)
+    {
+        return;
+    }
+
+    position_ = targetPosition;
+
+    if (position_.x < kFloorMinX) position_.x = kFloorMinX;
+    if (position_.x > kFloorMaxX) position_.x = kFloorMaxX;
+    if (position_.z < kFloorMinZ) position_.z = kFloorMinZ;
+    if (position_.z > kFloorMaxZ) position_.z = kFloorMaxZ;
+
+    if (position_.y <= kGroundY)
+    {
+        position_.y = kGroundY;
+        verticalVelocity_ = 0.0f;
+        isGrounded_ = true;
+    }
+    else
+    {
+        isGrounded_ = false;
+    }
+
     MV1SetPosition(modelHandle_, position_);
     UpdateColliderWorldPositions();
 }

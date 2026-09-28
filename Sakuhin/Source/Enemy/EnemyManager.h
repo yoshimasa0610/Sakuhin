@@ -18,7 +18,8 @@ public:
         int playerComboStep,
         bool isPlayerAttackHitboxActive,
         bool isPlayerAttacking,
-        bool isPlayerAerialStarterAttackActive);
+        bool isPlayerAerialStarterAttackActive,
+        float playerAttackElapsedTime);
 
     // •`‰æi“G–{‘Ì + UŒ‚”»’è‰Â‹‰»j
     void Draw() const;

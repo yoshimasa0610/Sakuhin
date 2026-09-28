@@ -41,9 +41,9 @@ namespace
     constexpr float kAerialStarterHoldThreshold = 0.30f;
 
     // 空中攻撃時のふわふわ挙動
-    constexpr float kAirAttackRiseGravityScale = 0.42f;
-    constexpr float kAirAttackFallGravityScale = 0.12f;
-    constexpr float kAirAttackLiftVelocity = 180.0f;
+    constexpr float kAirAttackRiseGravityScale = 0.68f;
+    constexpr float kAirAttackFallGravityScale = 0.24f;
+    constexpr float kAirAttackLiftVelocity = 82.0f;
 }
 
 // コンストラクタ：初期値設定
@@ -509,10 +509,12 @@ void Player::Update(float cameraYaw)
     if (CheckHitKey(KEY_INPUT_A)) currentKeyInput |= 8;
     if (CheckHitKey(KEY_INPUT_D)) currentKeyInput |= 16;
     if (CheckHitKey(KEY_INPUT_LSHIFT) || CheckHitKey(KEY_INPUT_RSHIFT)) currentKeyInput |= 32;
+    if (CheckHitKey(KEY_INPUT_Q)) currentKeyInput |= 64;
 
     const bool spacePressed = (currentKeyInput & 1) && !(previousKeyInput_ & 1);
     const bool hasMoveKeyInput = (currentKeyInput & (2 | 4 | 8 | 16)) != 0;
     const bool shiftPressed = (currentKeyInput & 32) && !(previousKeyInput_ & 32);
+    const bool qPressed = (currentKeyInput & 64) && !(previousKeyInput_ & 64);
 
     int currentAttackInput = 0;
     if ((GetMouseInput() & MOUSE_INPUT_LEFT) != 0)
@@ -578,6 +580,24 @@ void Player::Update(float cameraYaw)
 
         attack_.ExecuteStrongAttack();
         playerAnimation_.PlayDodgeAttack();
+    }
+    else if (qPressed
+        && attackRecoveryTimer_ <= 0.0f
+        && !isDodging_
+        && !attack_.IsAttacking()
+        && comboStep_ == 0
+        && isGrounded_)
+    {
+        queuedDodgeAttack_ = false;
+        canDodgeAttack_ = false;
+        dodgeAttackGraceTimer_ = 0.0f;
+        pendingCombo_ = false;
+        isAirAttackLocked_ = false;
+        isAerialStarterAttack_ = false;
+        pendingDodgeAttackRecovery_ = false;
+
+        attack_.ExecutePullAttack();
+        playerAnimation_.PlayPullAttack();
     }
     else if (canStartAerialStarter)
     {
@@ -975,6 +995,19 @@ void Player::StartAerialFollowJump(float targetY)
     if (targetY <= position_.y + 1.0f)
     {
         return;
+    }
+
+    // 打ち上げ始動攻撃がヒットしたら、その攻撃判定はここで終了して通常ジャンプへ切替える
+    if (isAerialStarterAttack_)
+    {
+        attack_.CancelAttack();
+        comboStep_ = 0;
+        pendingCombo_ = false;
+        isAerialStarterAttack_ = false;
+        isAirAttackLocked_ = false;
+        comboStepElapsedTime_ = 0.0f;
+        prevComboStepForHitbox_ = 0;
+        prevComboStepForAirFloat_ = 0;
     }
 
     // ジャンプ上昇モーションを開始

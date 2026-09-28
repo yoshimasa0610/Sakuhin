@@ -29,6 +29,9 @@ public:
     // エリアル始動用に敵を空中へ持ち上げる
     void LaunchToHeight(float targetY);
 
+    // 指定位置へ移動させる（引き寄せ用）
+    void MoveToPosition(const VECTOR& targetPosition);
+
     // 外部参照
     bool IsModelLoaded() const;
     const TCHAR* GetLoadedModelPath() const;

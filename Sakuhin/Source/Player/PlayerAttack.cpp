@@ -57,6 +57,13 @@ void Attack::ExecuteStrongAttack()
     attackDuration_ = 1.0f;
 }
 
+void Attack::ExecutePullAttack()
+{
+    currentAttack_ = AttackType::PullAttack;
+    attackTimer_ = 0.0f;
+    attackDuration_ = 0.85f;
+}
+
 // UŒ‚ƒLƒƒƒ“ƒZƒ‹
 void Attack::CancelAttack()
 {

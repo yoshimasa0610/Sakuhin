@@ -113,7 +113,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
             playerManager.GetPlayerComboStep(),
             playerManager.IsPlayerAttackHitboxActive(),
             playerManager.IsPlayerAttacking(),
-            playerManager.IsPlayerAerialStarterAttackActive());
+            playerManager.IsPlayerAerialStarterAttackActive(),
+            playerManager.GetPlayerAttackElapsedTime());
 
         float aerialFollowTargetY = 0.0f;
         if (enemyManager.ConsumeAerialFollowJumpRequest(aerialFollowTargetY))

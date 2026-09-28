@@ -28,6 +28,9 @@ public:
     // ‰ñ”ğUŒ‚Ä¶
     void PlayDodgeAttack();
 
+    // ˆø‚«Šñ‚¹UŒ‚Ä¶
+    void PlayPullAttack();
+
     // ’ÊíUŒ‚ƒRƒ“ƒ{’i‚ÌÄ¶
     void PlayComboSegment(int step,
         bool isGrounded,
@@ -76,4 +79,5 @@ private:
     int dodgeBackAnimIndex_;
     int dodgeForwardAnimIndex_;
     int dodgeAttackAnimIndex_;
+    int pullAttackAnimIndex_;
 };

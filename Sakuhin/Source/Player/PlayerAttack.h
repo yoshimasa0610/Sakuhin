@@ -4,6 +4,7 @@ enum class AttackType
 {
     WeakAttack,
     StrongAttack,
+    PullAttack,
     None
 };
 
@@ -19,6 +20,7 @@ public:
 
     void ExecuteWeakAttack();
     void ExecuteStrongAttack();
+    void ExecutePullAttack();
     void CancelAttack();
 
     AttackType GetCurrentAttack() const;

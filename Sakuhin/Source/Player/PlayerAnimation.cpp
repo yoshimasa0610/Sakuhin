@@ -9,6 +9,7 @@ namespace
     constexpr int kKnownIdleAnimIndex = 3;
     constexpr int kKnownDodgeAnimIndex = 6;
     constexpr int kKnownJumpAnimIndex = 10;
+    constexpr int kKnownPullAttackAnimIndex = 4;
 }
 
 PlayerAnimation::PlayerAnimation()
@@ -20,6 +21,7 @@ PlayerAnimation::PlayerAnimation()
     , dodgeBackAnimIndex_(kKnownDodgeAnimIndex)
     , dodgeForwardAnimIndex_(kKnownDodgeAnimIndex)
     , dodgeAttackAnimIndex_(kKnownDodgeAttackAnimIndex)
+    , pullAttackAnimIndex_(kKnownPullAttackAnimIndex)
 {
 }
 
@@ -34,6 +36,7 @@ void PlayerAnimation::Initialize()
     dodgeBackAnimIndex_ = kKnownDodgeAnimIndex;
     dodgeForwardAnimIndex_ = kKnownDodgeAnimIndex;
     dodgeAttackAnimIndex_ = kKnownDodgeAttackAnimIndex;
+    pullAttackAnimIndex_ = kKnownPullAttackAnimIndex;
     animationController_.Initialize(-1);
 }
 
@@ -60,6 +63,7 @@ bool PlayerAnimation::BindModel(int modelHandle)
     dodgeBackAnimIndex_ = kKnownDodgeAnimIndex;
     dodgeForwardAnimIndex_ = kKnownDodgeAnimIndex;
     dodgeAttackAnimIndex_ = kKnownDodgeAttackAnimIndex;
+    pullAttackAnimIndex_ = isValidIndex(kKnownPullAttackAnimIndex) ? kKnownPullAttackAnimIndex : attackAnimIndex_;
 
     animationController_.Initialize(modelHandle);
     return true;
@@ -102,9 +106,15 @@ void PlayerAnimation::PlayActionAnimation(int animIndex, float duration)
 
 void PlayerAnimation::PlayDodgeAttack()
 {
-    // 回避攻撃はモデルのアニメ番号1を単発再生
+    // 回避攻撃はモデルのアニメ番号1を全区間再生
     const float duration = 1.05f;
     animationController_.PlayOneShot(dodgeAttackAnimIndex_, duration);
+}
+
+void PlayerAnimation::PlayPullAttack()
+{
+    const float duration = 0.85f;
+    animationController_.PlayOneShot(pullAttackAnimIndex_, duration);
 }
 
 void PlayerAnimation::PlayComboSegment(int step,

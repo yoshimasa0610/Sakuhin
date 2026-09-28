@@ -16,6 +16,11 @@ namespace
     // ヒット連続発生抑制
     constexpr float kHitCooldown = 0.12f;
     constexpr float kAerialLaunchTargetY = 220.0f;
+    constexpr float kPullAttackHitStart = 0.45f;
+    constexpr float kPullAttackHitEnd = 0.5f;
+    constexpr float kPullAttackMinRange = 180.0f;
+    constexpr float kPullAttackMaxRange = 540.0f;
+    constexpr float kPullAttackFrontDistance = 120.0f;
 }
 
 // Enemy.xの読み込み
@@ -80,7 +85,8 @@ void EnemyManager::Update(const VECTOR& playerPosition,
     int playerComboStep,
     bool isPlayerAttackHitboxActive,
     bool isPlayerAttacking,
-    bool isPlayerAerialStarterAttackActive)
+    bool isPlayerAerialStarterAttackActive,
+    float playerAttackElapsedTime)
 {
     const float deltaTime = 1.0f / 60.0f;
     hasAerialFollowJumpRequest_ = false;
@@ -119,12 +125,13 @@ void EnemyManager::Update(const VECTOR& playerPosition,
 
     enemy_.Update();
 
+    const bool isPullAttackActive =
+        playerAttackType == AttackType::PullAttack
+        && playerAttackElapsedTime >= kPullAttackHitStart
+        && playerAttackElapsedTime <= kPullAttackHitEnd;
+
     // プレイヤー側が有効と判断したタイミングのみ判定を可視化・適用する
     showAttackHitbox_ = isPlayerAttackHitboxActive;
-    if (!isPlayerAttackHitboxActive)
-    {
-        return;
-    }
 
     // この攻撃段ですでにヒット済みなら、判定は描画のみで実ヒット処理は行わない
     if (hitRegisteredThisAttack_)
@@ -144,6 +151,29 @@ void EnemyManager::Update(const VECTOR& playerPosition,
     {
         // 取得できない場合は前方固定
         attackDir = VGet(0.0f, 0.0f, 1.0f);
+    }
+
+    if (isPullAttackActive)
+    {
+        const VECTOR enemyPosition = enemy_.GetPosition();
+        const VECTOR toEnemy = VSub(enemyPosition, playerPosition);
+        const float distance = std::sqrt(toEnemy.x * toEnemy.x + toEnemy.z * toEnemy.z);
+
+        if (distance >= kPullAttackMinRange && distance <= kPullAttackMaxRange)
+        {
+            VECTOR targetPosition = enemyPosition;
+            targetPosition.x = playerPosition.x + attackDir.x * kPullAttackFrontDistance;
+            targetPosition.z = playerPosition.z + attackDir.z * kPullAttackFrontDistance;
+            enemy_.MoveToPosition(targetPosition);
+            hitCooldownTimer_ = kHitCooldown;
+            hitRegisteredThisAttack_ = true;
+        }
+        return;
+    }
+
+    if (!isPlayerAttackHitboxActive)
+    {
+        return;
     }
 
     // 右方向（剣側オフセット用）
