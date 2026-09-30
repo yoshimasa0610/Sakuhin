@@ -5,8 +5,12 @@
 
 namespace
 {
+    // ダッシュ攻撃だけ再生と判定を少しゆっくりにする
+    constexpr float kDashAttackSlowScale = 1.8f;
+
     // モデル表示と向きの基準
-    constexpr float kModelScale = 1.0f;
+    // FBX の単位スケール変更後は等倍だと極端に小さいため、ゲーム内表示用に拡大して使う
+    constexpr float kModelScale = 125.0f;
     constexpr float kDefaultRotationY = 3.14159f;
 
     // 接地判定と床範囲
@@ -26,6 +30,13 @@ namespace
     // 行動中の微移動量
     constexpr float kDodgeMoveScale = 0.32f;
     constexpr float kAttackMoveScale = 0.18f;
+    // Shiftダッシュ時の移動倍率
+    constexpr float kDashMoveScale = 2.0f;
+    // ダッシュ攻撃の前進量と有効時間
+    constexpr float kDashAttackMoveSpeed = 12.0f;
+    constexpr float kDashAttackMoveDuration = 0.25f * kDashAttackSlowScale;
+    // 回避アニメの再生時間
+    constexpr float kDodgeAnimDuration = 0.5f;
 
     // 回避後の回避攻撃受付時間
     constexpr float kDodgeAttackGraceDuration = 1.0f;
@@ -36,6 +47,10 @@ namespace
 
     // 三段目コンボの当たり判定遅延（3段目再生中に確実に当たり判定が出る値）
     constexpr float kThirdComboHitDelay = 0.50f;
+
+    // ダッシュ攻撃の当たり判定有効区間
+    constexpr float kDashAttackHitStart = 0.50f * kDashAttackSlowScale;
+    constexpr float kDashAttackHitEnd = 0.75f * kDashAttackSlowScale;
 
     // 左クリック長押しでエリアル始動攻撃を出す閾値
     constexpr float kAerialStarterHoldThreshold = 0.30f;
@@ -171,25 +186,6 @@ bool Player::LoadModel(const TCHAR* modelPath)
         }
     }
 
-    // Blender から混入した不要オブジェクト(白い板)を非表示化する
-    {
-        const TCHAR* hiddenFrameCandidates[] =
-        {
-            _T("立方体"),
-            _T("Cube"),
-            _T("Cube.001")
-        };
-
-        for (const auto& frameName : hiddenFrameCandidates)
-        {
-            const int frameIndex = MV1SearchFrame(modelHandle_, frameName);
-            if (frameIndex >= 0)
-            {
-                MV1SetFrameVisible(modelHandle_, frameIndex, FALSE);
-            }
-        }
-    }
-
     modelLoaded_ = true;
     playerAnimation_.SwitchAnimation(false, modelLoaded_);
     return true;
@@ -203,6 +199,8 @@ void Player::Update(float cameraYaw)
     bool airPhysicsApplied = false;
     bool landedThisFrame = false;
     const bool wasAttackingAtFrameStart = attack_.IsAttacking() || comboStep_ > 0;
+    // StrongAttack は通常強攻撃ではなくダッシュ攻撃として使う
+    const bool isDashAttackActiveAtFrameStart = attack_.GetCurrentAttack() == AttackType::StrongAttack && comboStep_ == 0;
 
     // コンボ段ごとの経過時間を更新（段が変わったら0に戻す）
     if (comboStep_ > 0)
@@ -257,8 +255,8 @@ void Player::Update(float cameraYaw)
         }
     }
 
-    // カメラ向きに合わせてプレイヤーの向きを更新（回避中は維持）
-    if (!isDodging_)
+    // カメラ向きに合わせてプレイヤーの向きを更新（回避中とダッシュ攻撃中は維持）
+    if (!isDodging_ && !isDashAttackActiveAtFrameStart)
     {
         modelRotationY_ = cameraYaw + kDefaultRotationY;
     }
@@ -411,7 +409,7 @@ void Player::Update(float cameraYaw)
         }
         else if (isDodging_)
         {
-            const float animDuration = 0.5f;
+            const float animDuration = kDodgeAnimDuration;
 
             if (modelHandle_ >= 0)
             {
@@ -423,29 +421,11 @@ void Player::Update(float cameraYaw)
             {
                 isDodging_ = false;
                 actionTimer_ = 0.0f;
-                canDodgeAttack_ = true;
-                dodgeAttackGraceTimer_ = kDodgeAttackGraceDuration;
-                bool startedDodgeAttack = false;
+                canDodgeAttack_ = false;
+                dodgeAttackGraceTimer_ = 0.0f;
+                queuedDodgeAttack_ = false;
 
-                if (queuedDodgeAttack_
-                    && attackRecoveryTimer_ <= 0.0f
-                    && !attack_.IsAttacking()
-                    && comboStep_ == 0
-                    && !isJumping_)
-                {
-                    queuedDodgeAttack_ = false;
-                    canDodgeAttack_ = false;
-                    dodgeAttackGraceTimer_ = 0.0f;
-                    pendingCombo_ = false;
-                    isAirAttackLocked_ = false;
-                    pendingDodgeAttackRecovery_ = true;
-
-                    attack_.ExecuteStrongAttack();
-                    playerAnimation_.PlayDodgeAttack();
-                    startedDodgeAttack = true;
-                }
-
-                if (isGrounded_ && !startedDodgeAttack)
+                if (isGrounded_)
                 {
                     playerAnimation_.SwitchAnimation(false, modelLoaded_);
                 }
@@ -472,6 +452,7 @@ void Player::Update(float cameraYaw)
 
     // 通常移動入力（カメラ基準）
     VECTOR move = VGet(0.0f, 0.0f, 0.0f);
+    // Shift はダッシュ用に使う
     const bool isShiftPressed = CheckHitKey(KEY_INPUT_LSHIFT) || CheckHitKey(KEY_INPUT_RSHIFT);
 
     const VECTOR cameraForward = VGet(std::sin(cameraYaw), 0.0f, std::cos(cameraYaw));
@@ -508,12 +489,13 @@ void Player::Update(float cameraYaw)
     if (CheckHitKey(KEY_INPUT_S)) currentKeyInput |= 4;
     if (CheckHitKey(KEY_INPUT_A)) currentKeyInput |= 8;
     if (CheckHitKey(KEY_INPUT_D)) currentKeyInput |= 16;
-    if (CheckHitKey(KEY_INPUT_LSHIFT) || CheckHitKey(KEY_INPUT_RSHIFT)) currentKeyInput |= 32;
+    // 回避は左Ctrlで受け付ける
+    if (CheckHitKey(KEY_INPUT_LCONTROL)) currentKeyInput |= 32;
     if (CheckHitKey(KEY_INPUT_Q)) currentKeyInput |= 64;
 
     const bool spacePressed = (currentKeyInput & 1) && !(previousKeyInput_ & 1);
     const bool hasMoveKeyInput = (currentKeyInput & (2 | 4 | 8 | 16)) != 0;
-    const bool shiftPressed = (currentKeyInput & 32) && !(previousKeyInput_ & 32);
+    const bool ctrlPressed = (currentKeyInput & 32) && !(previousKeyInput_ & 32);
     const bool qPressed = (currentKeyInput & 64) && !(previousKeyInput_ & 64);
 
     int currentAttackInput = 0;
@@ -524,6 +506,16 @@ void Player::Update(float cameraYaw)
     const bool attackPressed = (currentAttackInput & 1) && !(previousMouseInput_ & 1);
     const bool attackHeld = (currentAttackInput & 1) != 0;
     const bool attackReleased = !(currentAttackInput & 1) && (previousMouseInput_ & 1);
+
+    // Shift を押しながら移動入力がある間だけダッシュ扱いにする
+    const bool isDashing = isShiftPressed
+        && isMoving
+        && !isDodging_
+        && !isJumping_
+        && isGrounded_
+        && attackRecoveryTimer_ <= 0.0f
+        && !attack_.IsAttacking()
+        && comboStep_ == 0;
 
     // 左クリック長押し時間を計測（エリアル始動判定に使用）
     if (attackHeld)
@@ -536,9 +528,10 @@ void Player::Update(float cameraYaw)
         attackHoldTimer_ += deltaTime;
     }
 
+    // ダッシュ攻撃はShiftダッシュ中の攻撃入力時だけ発動する
     const bool shouldTriggerDodgeAttack =
-        canDodgeAttack_
-        && attackHeld
+        isDashing
+        && attackPressed
         && !isDodging_
         && !attack_.IsAttacking()
         && comboStep_ == 0
@@ -578,6 +571,15 @@ void Player::Update(float cameraYaw)
         pendingDodgeAttackRecovery_ = true;
         isAerialStarterAttack_ = false;
 
+        // ダッシュ中に攻撃を出した瞬間の移動方向へ向きを固定する
+        // これにより、ダッシュ攻撃がプレイヤーの向いている方向へ素直に出る
+        if (length > 0.0f)
+        {
+            const float moveX = move.x / length;
+            const float moveZ = move.z / length;
+            modelRotationY_ = static_cast<float>(std::atan2(moveX, moveZ)) + kDefaultRotationY;
+        }
+
         attack_.ExecuteStrongAttack();
         playerAnimation_.PlayDodgeAttack();
     }
@@ -616,11 +618,7 @@ void Player::Update(float cameraYaw)
     }
     else if (attackPressed && attackRecoveryTimer_ <= 0.0f)
     {
-        if (isDodging_)
-        {
-            queuedDodgeAttack_ = true;
-        }
-        else if (comboStep_ > 0 && comboStep_ <= 2)
+        if (comboStep_ > 0 && comboStep_ <= 2)
         {
             pendingCombo_ = true;
         }
@@ -648,11 +646,21 @@ void Player::Update(float cameraYaw)
 
     // 今フレームで攻撃中かどうかをまとめて判定
     const bool isAttackAnimating = attack_.IsAttacking() || comboStep_ > 0 || attackPressed;
+    const bool isDashAttackAnimating = attack_.GetCurrentAttack() == AttackType::StrongAttack && comboStep_ == 0;
+
+    // ダッシュ攻撃中は向いている前方へ自動で踏み込ませる
+    if (isDashAttackAnimating && attack_.GetAttackDuration() <= kDashAttackMoveDuration)
+    {
+        const VECTOR forward = GetFacingDirection();
+        position_.x += forward.x * kDashAttackMoveSpeed;
+        position_.z += forward.z * kDashAttackMoveSpeed;
+    }
 
     // 空中・行動中の微移動
     {
         // アクション中でも違和感が出ない範囲で少しだけ移動を許可
-        if (isMoving && !isJumping_ && !isAirAttackLocked_ && (isDodging_ || isAttackAnimating))
+        // ただしダッシュ攻撃中は踏み込み方向を固定したいので手動移動は止める
+        if (isMoving && !isJumping_ && !isAirAttackLocked_ && (isDodging_ || isAttackAnimating) && !isDashAttackAnimating)
         {
             move.x /= length;
             move.z /= length;
@@ -663,8 +671,8 @@ void Player::Update(float cameraYaw)
         }
     }
 
-    // Shift単体で後方回避、WASD入力+Shiftで前方回避
-    if (shiftPressed && !isDodging_ && !attack_.IsAttacking() && comboStep_ == 0 && isGrounded_ && attackRecoveryTimer_ <= 0.0f)
+    // 左Ctrl単体で後方回避、WASD入力+左Ctrlで前方回避
+    if (ctrlPressed && !isDodging_ && !attack_.IsAttacking() && comboStep_ == 0 && isGrounded_ && attackRecoveryTimer_ <= 0.0f)
     {
         queuedDodgeAttack_ = false;
         canDodgeAttack_ = false;
@@ -698,7 +706,7 @@ void Player::Update(float cameraYaw)
                 position_.z += moveZ * moveSpeed_ * (kDodgeMoveScale * 1.2f);
             }
 
-            playerAnimation_.PlayActionAnimation(playerAnimation_.GetDodgeForwardAnimIndex(), 0.5f);
+            playerAnimation_.PlayActionAnimation(playerAnimation_.GetDodgeForwardAnimIndex(), kDodgeAnimDuration);
 
             previousKeyInput_ = currentKeyInput;
             return;
@@ -714,7 +722,7 @@ void Player::Update(float cameraYaw)
                 MV1SetRotationXYZ(modelHandle_, VGet(0.0f, modelRotationY_, 0.0f));
             }
 
-            playerAnimation_.PlayActionAnimation(playerAnimation_.GetDodgeBackAnimIndex(), 0.5f);
+            playerAnimation_.PlayActionAnimation(playerAnimation_.GetDodgeBackAnimIndex(), kDodgeAnimDuration);
 
             previousKeyInput_ = currentKeyInput;
             return;
@@ -740,13 +748,15 @@ void Player::Update(float cameraYaw)
     }
 
     // 地上・空中移動
-    if (isMoving && !isShiftPressed && !isDodging_ && !isAttackAnimating && attackRecoveryTimer_ <= 0.0f)
+    if (isMoving && !isDodging_ && !isAttackAnimating && attackRecoveryTimer_ <= 0.0f)
     {
         move.x /= length;
         move.z /= length;
 
-        position_.x += move.x * moveSpeed_;
-        position_.z += move.z * moveSpeed_;
+        // Shift中は歩きモーションのまま速度だけ上げてダッシュする
+        const float moveScale = (isShiftPressed && isGrounded_) ? kDashMoveScale : 1.0f;
+        position_.x += move.x * moveSpeed_ * moveScale;
+        position_.z += move.z * moveSpeed_ * moveScale;
 
         modelRotationY_ = static_cast<float>(std::atan2(move.x, move.z)) + kDefaultRotationY;
     }
@@ -968,6 +978,13 @@ int Player::GetComboStep() const
 // 攻撃判定有効タイミング判定
 bool Player::IsAttackHitboxActive() const
 {
+    // ダッシュ攻撃はコンボ段を使わないため、経過時間で判定する
+    if (attack_.GetCurrentAttack() == AttackType::StrongAttack && comboStep_ == 0)
+    {
+        const float elapsed = attack_.GetAttackDuration();
+        return elapsed >= kDashAttackHitStart && elapsed <= kDashAttackHitEnd;
+    }
+
     // コンボ段が無いときは判定無し
     if (comboStep_ <= 0)
     {

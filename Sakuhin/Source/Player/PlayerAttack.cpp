@@ -1,5 +1,11 @@
 #include "PlayerAttack.h"
 
+namespace
+{
+    // ダッシュ攻撃だけ見た目の再生速度低下に合わせて少し長く保持する
+    constexpr float kDashAttackSlowScale = 1.8f;
+}
+
 // コンストラクタ
 Attack::Attack()
     : currentAttack_(AttackType::None)
@@ -54,7 +60,7 @@ void Attack::ExecuteStrongAttack()
 {
     currentAttack_ = AttackType::StrongAttack;
     attackTimer_ = 0.0f;
-    attackDuration_ = 1.0f;
+    attackDuration_ = 1.0f * kDashAttackSlowScale;
 }
 
 void Attack::ExecutePullAttack()
