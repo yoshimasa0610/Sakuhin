@@ -2,22 +2,19 @@
 
 namespace
 {
-    // ダッシュ攻撃だけ再生を少しゆっくりにする
+    // ダッシュ攻撃だけ見た目の再生速度低下に合わせて少し長く保持する
     constexpr float kDashAttackSlowScale = 1.8f;
 
-    // モデル側で固定運用しているアニメ番号
+    // モデル側で固定して使っているアニメーション番号
     constexpr int kKnownAttackAnimIndex = 0;
-    // ユーザー指定のダッシュ攻撃候補番号
-    constexpr int kKnownDashAttackAnimIndexPrimary = 12;
-    // DCCツールや一覧表示によっては12番目=添字11のことがあるため予備候補も持つ
-    constexpr int kKnownDashAttackAnimIndexSecondary = 11;
-    // 旧回避攻撃番号は最終フォールバックとして残しておく
-    constexpr int kKnownDodgeAttackAnimIndexFallback = 1;
+    constexpr int kKnownDodgeAttackAnimIndex = 1;
     constexpr int kKnownMoveAnimIndex = 2;
     constexpr int kKnownIdleAnimIndex = 3;
+    constexpr int kKnownPullAttackAnimIndex = 4;
     constexpr int kKnownDodgeAnimIndex = 6;
     constexpr int kKnownJumpAnimIndex = 10;
-    constexpr int kKnownPullAttackAnimIndex = 4;
+    constexpr int kKnownDashAttackAnimIndexPrimary = 12;
+    constexpr int kKnownDashAttackAnimIndexSecondary = 11;
 }
 
 PlayerAnimation::PlayerAnimation()
@@ -28,14 +25,15 @@ PlayerAnimation::PlayerAnimation()
     , jumpAnimIndex_(kKnownJumpAnimIndex)
     , dodgeBackAnimIndex_(kKnownDodgeAnimIndex)
     , dodgeForwardAnimIndex_(kKnownDodgeAnimIndex)
-    , dodgeAttackAnimIndex_(kKnownDodgeAttackAnimIndexFallback)
+    , dashAttackAnimIndex_(kKnownAttackAnimIndex)
+    , dodgeAttackAnimIndex_(kKnownDodgeAttackAnimIndex)
     , pullAttackAnimIndex_(kKnownPullAttackAnimIndex)
 {
 }
 
 void PlayerAnimation::Initialize()
 {
-    // 参照アニメ番号と再生状態を初期値へ戻す
+    // 参照アニメーション番号と再生状態を初期値へ戻す
     useWalkAnimation_ = false;
     attackAnimIndex_ = kKnownAttackAnimIndex;
     walkAnimIndex_ = kKnownMoveAnimIndex;
@@ -43,23 +41,25 @@ void PlayerAnimation::Initialize()
     jumpAnimIndex_ = kKnownJumpAnimIndex;
     dodgeBackAnimIndex_ = kKnownDodgeAnimIndex;
     dodgeForwardAnimIndex_ = kKnownDodgeAnimIndex;
-    dodgeAttackAnimIndex_ = kKnownDodgeAttackAnimIndexFallback;
+    dashAttackAnimIndex_ = kKnownAttackAnimIndex;
+    dodgeAttackAnimIndex_ = kKnownDodgeAttackAnimIndex;
     pullAttackAnimIndex_ = kKnownPullAttackAnimIndex;
     animationController_.Initialize(-1);
 }
 
 bool PlayerAnimation::BindModel(int modelHandle)
 {
-    // 主要アニメ番号がモデル内に存在するか確認
+    // 各アニメーション番号がモデル内に存在するか確認する
     const int animCount = MV1GetAnimNum(modelHandle);
     auto isValidIndex = [animCount](int index) { return index >= 0 && index < animCount; };
 
-    // モデル表示に必須の基本アニメだけをロード必須条件にする
+    // 必須のアニメーション番号を確認する
     if (!isValidIndex(kKnownAttackAnimIndex)
         || !isValidIndex(kKnownMoveAnimIndex)
         || !isValidIndex(kKnownIdleAnimIndex)
         || !isValidIndex(kKnownDodgeAnimIndex)
-        || !isValidIndex(kKnownJumpAnimIndex))
+        || !isValidIndex(kKnownJumpAnimIndex)
+        || !isValidIndex(kKnownDodgeAttackAnimIndex))
     {
         return false;
     }
@@ -70,24 +70,21 @@ bool PlayerAnimation::BindModel(int modelHandle)
     jumpAnimIndex_ = kKnownJumpAnimIndex;
     dodgeBackAnimIndex_ = kKnownDodgeAnimIndex;
     dodgeForwardAnimIndex_ = kKnownDodgeAnimIndex;
+    dodgeAttackAnimIndex_ = kKnownDodgeAttackAnimIndex;
+    pullAttackAnimIndex_ = isValidIndex(kKnownPullAttackAnimIndex) ? kKnownPullAttackAnimIndex : attackAnimIndex_;
 
-    // ダッシュ攻撃は 12 → 11 → 旧1番 の順で使えるものを採用する
     if (isValidIndex(kKnownDashAttackAnimIndexPrimary))
     {
-        dodgeAttackAnimIndex_ = kKnownDashAttackAnimIndexPrimary;
+        dashAttackAnimIndex_ = kKnownDashAttackAnimIndexPrimary;
     }
     else if (isValidIndex(kKnownDashAttackAnimIndexSecondary))
     {
-        dodgeAttackAnimIndex_ = kKnownDashAttackAnimIndexSecondary;
+        dashAttackAnimIndex_ = kKnownDashAttackAnimIndexSecondary;
     }
     else
     {
-        dodgeAttackAnimIndex_ = isValidIndex(kKnownDodgeAttackAnimIndexFallback)
-            ? kKnownDodgeAttackAnimIndexFallback
-            : attackAnimIndex_;
+        dashAttackAnimIndex_ = attackAnimIndex_;
     }
-
-    pullAttackAnimIndex_ = isValidIndex(kKnownPullAttackAnimIndex) ? kKnownPullAttackAnimIndex : attackAnimIndex_;
 
     animationController_.Initialize(modelHandle);
     return true;
@@ -110,7 +107,7 @@ void PlayerAnimation::SwitchAnimation(bool useWalkAnimation, bool modelLoaded)
         return;
     }
 
-    // 同一ループ再生中は再アタッチしない
+    // ループ再生中は再アタッチしない
     if (useWalkAnimation_ == useWalkAnimation && animationController_.IsPlaying())
     {
         return;
@@ -128,9 +125,16 @@ void PlayerAnimation::PlayActionAnimation(int animIndex, float duration)
     animationController_.PlayOneShot(animIndex, duration);
 }
 
+void PlayerAnimation::PlayDashAttack()
+{
+    // ダッシュ攻撃は別番号で再生する
+    const float duration = 1.05f * kDashAttackSlowScale;
+    animationController_.PlayOneShot(dashAttackAnimIndex_, duration);
+}
+
 void PlayerAnimation::PlayDodgeAttack()
 {
-    // ダッシュ攻撃だけは少しゆっくり最後まで再生する
+    // 回避攻撃は指定のアニメーション番号1を再生する
     const float duration = 1.05f * kDashAttackSlowScale;
     animationController_.PlayOneShot(dodgeAttackAnimIndex_, duration);
 }
@@ -149,7 +153,7 @@ void PlayerAnimation::PlayComboSegment(int step,
     int& comboStep,
     Attack& attack)
 {
-    // 空中コンボ時は段中の位置を固定
+    // 空中コンボ中は現在位置を固定
     if (!isGrounded)
     {
         isAirAttackLocked = true;
@@ -209,7 +213,7 @@ void PlayerAnimation::UpdateAttackAnimation(bool modelLoaded,
         return;
     }
 
-    // 現段終了時に予約があれば次段へ
+    // コンボ継続予約があるなら次の段を再生する
     if (pendingCombo && comboStep < 3)
     {
         pendingCombo = false;
@@ -217,7 +221,7 @@ void PlayerAnimation::UpdateAttackAnimation(bool modelLoaded,
         return;
     }
 
-    // コンボ完了時の状態復帰
+    // コンボ終了時の状態を戻す
     if (modelHandle >= 0)
     {
         position = MV1GetPosition(modelHandle);

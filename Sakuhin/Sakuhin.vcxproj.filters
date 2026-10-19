@@ -29,10 +29,12 @@
     <ClCompile Include="Source\Enemy\EnemyManager.cpp">
       <Filter>Enemy</Filter>
     </ClCompile>
-    <ClCompile Include="PlayerAnimation.cpp">
+    <ClCompile Include="Source\Player\PlayerAnimation.cpp">
       <Filter>Player\PlayerAnimation</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Player\PlayerAnimation.cpp" />
+    <ClCompile Include="Source\Enemy\EnemyAnimation.cpp">
+      <Filter>Enemy\EnemyAnimation</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Player">
@@ -61,6 +63,9 @@
     </Filter>
     <Filter Include="Player\PlayerAnimation">
       <UniqueIdentifier>{557345b6-c697-4a8d-92c8-ddea13be5c1e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Enemy\EnemyAnimation">
+      <UniqueIdentifier>{11865989-94e2-4ac2-ae26-c33d11aab21f}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -94,6 +99,11 @@
     <ClInclude Include="Source\Enemy\EnemyManager.h">
       <Filter>Enemy</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Player\PlayerAnimation.h" />
+    <ClInclude Include="Source\Player\PlayerAnimation.h">
+      <Filter>Player\PlayerAnimation</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Enemy\EnemyAnimation.h">
+      <Filter>Enemy\EnemyAnimation</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

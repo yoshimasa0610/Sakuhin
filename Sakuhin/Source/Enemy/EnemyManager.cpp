@@ -13,14 +13,20 @@ namespace
         return _taccess(path, 0) == 0;
     }
 
-    // ヒット連続発生抑制
+    // ヒット判定アニメーション
     constexpr float kHitCooldown = 0.12f;
     constexpr float kAerialLaunchTargetY = 220.0f;
     constexpr float kPullAttackHitStart = 0.45f;
     constexpr float kPullAttackHitEnd = 0.5f;
-    constexpr float kPullAttackMinRange = 180.0f;
-    constexpr float kPullAttackMaxRange = 540.0f;
+    // 引っ張り攻撃の有効射程を長めにする
+    constexpr float kPullAttackMinRange = 240.0f;
+    constexpr float kPullAttackMaxRange = 1200.0f;
     constexpr float kPullAttackFrontDistance = 120.0f;
+    constexpr float kPullAttackFlinchKnockback = 18.0f;
+
+    // 回避攻撃のヒット判定時間
+    constexpr float kDodgeAttackHitStart = 0.18f;
+    constexpr float kDodgeAttackHitEnd = 1.66f;
 }
 
 // Enemy.xの読み込み
@@ -35,7 +41,7 @@ void EnemyManager::Initialize()
     hasAerialFollowJumpRequest_ = false;
     aerialFollowJumpTargetY_ = 0.0f;
 
-    // 相対パス候補を順番に試す
+    // まず相対パスを順番に試す
     const TCHAR* relativeCandidates[] =
     {
         _T("Source/Images/Enemy/Enemy.x"),
@@ -78,7 +84,7 @@ void EnemyManager::Initialize()
     }
 }
 
-// 敵更新
+// 更新
 void EnemyManager::Update(const VECTOR& playerPosition,
     const VECTOR& playerFacingDirection,
     AttackType playerAttackType,
@@ -107,14 +113,14 @@ void EnemyManager::Update(const VECTOR& playerPosition,
         prevComboStep_ = playerComboStep;
     }
 
-    // コンボ段が進んだら、その段のヒットを許可
+    // コンボ段が変わったら次のヒットを受け付ける
     if (isPlayerAttacking && wasPlayerAttackingPrev_ && playerComboStep != prevComboStep_)
     {
         hitRegisteredThisAttack_ = false;
         prevComboStep_ = playerComboStep;
     }
 
-    // 攻撃終了フレームで次攻撃に備えて状態を戻す
+    // 攻撃終了時に状態を戻す
     if (!isPlayerAttacking && wasPlayerAttackingPrev_)
     {
         hitRegisteredThisAttack_ = false;
@@ -123,23 +129,24 @@ void EnemyManager::Update(const VECTOR& playerPosition,
 
     wasPlayerAttackingPrev_ = isPlayerAttacking;
 
-    enemy_.Update();
+    // エネミー本体の行動とアニメーション更新
+    enemy_.Update(playerPosition);
 
     const bool isPullAttackActive =
         playerAttackType == AttackType::PullAttack
         && playerAttackElapsedTime >= kPullAttackHitStart
         && playerAttackElapsedTime <= kPullAttackHitEnd;
 
-    // プレイヤー側が有効と判断したタイミングのみ判定を可視化・適用する
+    // プレイヤーのヒット判定が有効なタイミングだけ可視化する
     showAttackHitbox_ = isPlayerAttackHitboxActive;
 
-    // この攻撃段ですでにヒット済みなら、判定は描画のみで実ヒット処理は行わない
+    // 1回の攻撃で既にヒットしているなら、そのまま次フレームへ
     if (hitRegisteredThisAttack_)
     {
         return;
     }
 
-    // 攻撃方向（プレイヤーの向きベクトルをそのまま使用）
+    // 攻撃向きの基準ベクトルを作る
     VECTOR attackDir = VGet(playerFacingDirection.x, 0.0f, playerFacingDirection.z);
     const float dirLen = std::sqrt(attackDir.x * attackDir.x + attackDir.z * attackDir.z);
     if (dirLen > 0.0001f)
@@ -165,6 +172,7 @@ void EnemyManager::Update(const VECTOR& playerPosition,
             targetPosition.x = playerPosition.x + attackDir.x * kPullAttackFrontDistance;
             targetPosition.z = playerPosition.z + attackDir.z * kPullAttackFrontDistance;
             enemy_.MoveToPosition(targetPosition);
+            enemy_.ApplyPullAttackHit(playerPosition, kPullAttackFlinchKnockback);
             hitCooldownTimer_ = kHitCooldown;
             hitRegisteredThisAttack_ = true;
         }
@@ -176,10 +184,10 @@ void EnemyManager::Update(const VECTOR& playerPosition,
         return;
     }
 
-    // 右方向（剣側オフセット用）
+    // 右方向ベクトルを作る
     const VECTOR rightDir = VGet(attackDir.z, 0.0f, -attackDir.x);
 
-    // 攻撃種別に応じて判定サイズを調整
+    // 攻撃種別に応じて判定サイズと位置を切り替える
     float swordForward = 78.0f;
     float swordSide = 42.0f;
     swordHitRadius_ = 44.0f;
@@ -189,6 +197,7 @@ void EnemyManager::Update(const VECTOR& playerPosition,
 
     float knockbackDistance = 12.0f;
 
+    // ダッシュ攻撃は少し広く強めにする
     if (playerAttackType == AttackType::StrongAttack)
     {
         swordForward = 92.0f;
@@ -200,20 +209,32 @@ void EnemyManager::Update(const VECTOR& playerPosition,
 
         knockbackDistance = 16.0f;
     }
+    // 回避攻撃も同じ流れで判定を出す
+    else if (playerAttackType == AttackType::DodgeAttack)
+    {
+        swordForward = 86.0f;
+        swordSide = 0.0f;
+        swordHitRadius_ = 42.0f;
 
-    // 剣判定（プレイヤー向き基準で前方 + 右側へ寄せる）
+        frontForward = 58.0f;
+        frontHitRadius_ = 30.0f;
+
+        knockbackDistance = 14.0f;
+    }
+
+    // 武器判定の中心座標
     swordHitCenter_ = VGet(
         playerPosition.x + attackDir.x * swordForward + rightDir.x * swordSide,
         playerPosition.y + 94.0f,
         playerPosition.z + attackDir.z * swordForward + rightDir.z * swordSide);
 
-    // 前面補助判定（プレイヤー向き基準の正面）
+    // 前方の補助判定
     frontHitCenter_ = VGet(
         playerPosition.x + attackDir.x * frontForward,
         playerPosition.y + 90.0f,
         playerPosition.z + attackDir.z * frontForward);
 
-    // ヒット判定は剣→前面の順で評価
+    // ヒット受付中だけ敵に反映する
     if (hitCooldownTimer_ <= 0.0f)
     {
         bool hit = false;
@@ -229,6 +250,7 @@ void EnemyManager::Update(const VECTOR& playerPosition,
 
         if (hit)
         {
+            // エリアル始動攻撃なら敵を打ち上げて追従させる
             if (isPlayerAerialStarterAttackActive)
             {
                 enemy_.LaunchToHeight(kAerialLaunchTargetY);
@@ -242,23 +264,23 @@ void EnemyManager::Update(const VECTOR& playerPosition,
     }
 }
 
-// 敵描画
+// 描画
 void EnemyManager::Draw() const
 {
     enemy_.Draw();
 
-    // プレイヤー攻撃判定の可視化
+    // プレイヤー側の攻撃判定を描画
     if (showAttackHitbox_)
     {
-        const int swordColor = GetColor(80, 200, 255);   // 剣判定: 水色
-        const int frontColor = GetColor(255, 160, 80);   // 前面判定: 橙
+        const int swordColor = GetColor(80, 200, 255);   // 武器側: 青系
+        const int frontColor = GetColor(255, 160, 80);   // 前方判定: 橙系
 
         DrawSphere3D(swordHitCenter_, swordHitRadius_, 12, swordColor, swordColor, FALSE);
         DrawSphere3D(frontHitCenter_, frontHitRadius_, 12, frontColor, frontColor, FALSE);
     }
 }
 
-// 敵終了処理
+// 終了処理
 void EnemyManager::Finalize()
 {
     enemy_.Finalize();
@@ -274,4 +296,18 @@ bool EnemyManager::ConsumeAerialFollowJumpRequest(float& outTargetY)
     outTargetY = aerialFollowJumpTargetY_;
     hasAerialFollowJumpRequest_ = false;
     return true;
+}
+
+// ロックオン対象として使えるかどうか
+bool EnemyManager::HasLockOnTarget() const
+{
+    return enemy_.IsModelLoaded();
+}
+
+// ロックオン用の注視位置を返す
+VECTOR EnemyManager::GetLockOnTargetPosition() const
+{
+    // 敵の胸元あたりを狙うと見やすいので少し上へずらす
+    const VECTOR enemyPosition = enemy_.GetPosition();
+    return VGet(enemyPosition.x, enemyPosition.y + 110.0f, enemyPosition.z);
 }

@@ -28,13 +28,15 @@ namespace
     constexpr float kJumpFallHoldFrame = 30.0f;
 
     // 行動中の微移動量
-    constexpr float kDodgeMoveScale = 0.32f;
+    constexpr float kDodgeMoveScale = 1.32f;
     constexpr float kAttackMoveScale = 0.18f;
     // Shiftダッシュ時の移動倍率
     constexpr float kDashMoveScale = 2.0f;
     // ダッシュ攻撃の前進量と有効時間
     constexpr float kDashAttackMoveSpeed = 12.0f;
     constexpr float kDashAttackMoveDuration = 0.25f * kDashAttackSlowScale;
+    // 回避攻撃の再生時間
+    constexpr float kDodgeAttackAnimDuration = 1.05f * kDashAttackSlowScale;
     // 回避アニメの再生時間
     constexpr float kDodgeAnimDuration = 0.5f;
 
@@ -59,6 +61,82 @@ namespace
     constexpr float kAirAttackRiseGravityScale = 0.68f;
     constexpr float kAirAttackFallGravityScale = 0.24f;
     constexpr float kAirAttackLiftVelocity = 82.0f;
+
+    // プレイヤーの攻撃判定を描画する
+    void DrawAttackHitboxes(const VECTOR& position, const VECTOR& facingDirection, AttackType currentAttack, int comboStep, float attackElapsedTime)
+    {
+        VECTOR attackDir = VGet(facingDirection.x, 0.0f, facingDirection.z);
+        const float dirLen = std::sqrt(attackDir.x * attackDir.x + attackDir.z * attackDir.z);
+        if (dirLen > 0.0001f)
+        {
+            attackDir.x /= dirLen;
+            attackDir.z /= dirLen;
+        }
+        else
+        {
+            attackDir = VGet(0.0f, 0.0f, 1.0f);
+        }
+
+        const VECTOR rightDir = VGet(attackDir.z, 0.0f, -attackDir.x);
+
+        // ダッシュ攻撃は前方と右側に広めの判定を出す
+        if (currentAttack == AttackType::StrongAttack && comboStep == 0)
+        {
+            const bool isActive = attackElapsedTime >= kDashAttackHitStart && attackElapsedTime <= kDashAttackHitEnd;
+            if (!isActive)
+            {
+                return;
+            }
+
+            const VECTOR swordCenter = VGet(
+                position.x + attackDir.x * 92.0f + rightDir.x * 48.0f,
+                position.y + 94.0f,
+                position.z + attackDir.z * 92.0f + rightDir.z * 48.0f);
+
+            const VECTOR frontCenter = VGet(
+                position.x + attackDir.x * 62.0f,
+                position.y + 90.0f,
+                position.z + attackDir.z * 62.0f);
+
+            const int swordColor = GetColor(80, 200, 255);
+            const int frontColor = GetColor(255, 160, 80);
+            DrawSphere3D(swordCenter, 52.0f, 12, swordColor, swordColor, FALSE);
+            DrawSphere3D(frontCenter, 36.0f, 12, frontColor, frontColor, FALSE);
+            return;
+        }
+
+        // 回避攻撃は1番アニメを使い、前方に少し大きめの判定を出す
+        if (currentAttack == AttackType::DodgeAttack)
+        {
+            const VECTOR dodgeCenter = VGet(
+                position.x + attackDir.x * 86.0f,
+                position.y + 92.0f,
+                position.z + attackDir.z * 86.0f);
+
+            const int dodgeColor = GetColor(255, 120, 220);
+            DrawSphere3D(dodgeCenter, 42.0f, 12, dodgeColor, dodgeColor, FALSE);
+            return;
+        }
+
+        // 通常コンボは段ごとに少し位置を変えて判定を出す
+        if (comboStep > 0)
+        {
+            if (comboStep == 3 && attackElapsedTime < kThirdComboHitDelay)
+            {
+                return;
+            }
+
+            const float forward = (comboStep == 1) ? 78.0f : ((comboStep == 2) ? 84.0f : 92.0f);
+            const float radius = (comboStep == 1) ? 34.0f : ((comboStep == 2) ? 38.0f : 44.0f);
+            const VECTOR center = VGet(
+                position.x + attackDir.x * forward,
+                position.y + 90.0f,
+                position.z + attackDir.z * forward);
+
+            const int comboColor = GetColor(255, 220, 40);
+            DrawSphere3D(center, radius, 12, comboColor, comboColor, FALSE);
+        }
+    }
 }
 
 // コンストラクタ：初期値設定
@@ -409,7 +487,10 @@ void Player::Update(float cameraYaw)
         }
         else if (isDodging_)
         {
-            const float animDuration = kDodgeAnimDuration;
+            // 回避攻撃中は回避アニメより長く維持する
+            const float animDuration = (attack_.GetCurrentAttack() == AttackType::DodgeAttack)
+                ? kDodgeAttackAnimDuration
+                : kDodgeAnimDuration;
 
             if (modelHandle_ >= 0)
             {
@@ -417,13 +498,10 @@ void Player::Update(float cameraYaw)
                 ClampToGround();
             }
 
-            if (actionTimer_ >= animDuration)
+            if (actionTimer_ >= animDuration && !attack_.IsAttacking())
             {
                 isDodging_ = false;
                 actionTimer_ = 0.0f;
-                canDodgeAttack_ = false;
-                dodgeAttackGraceTimer_ = 0.0f;
-                queuedDodgeAttack_ = false;
 
                 if (isGrounded_)
                 {
@@ -528,6 +606,14 @@ void Player::Update(float cameraYaw)
         attackHoldTimer_ += deltaTime;
     }
 
+    // 回避中に攻撃を押したら、回避攻撃をバッファしておく
+    if (isDodging_ && attackPressed)
+    {
+        queuedDodgeAttack_ = true;
+        canDodgeAttack_ = true;
+        dodgeAttackGraceTimer_ = kDodgeAttackGraceDuration;
+    }
+
     // ダッシュ攻撃はShiftダッシュ中の攻撃入力時だけ発動する
     const bool shouldTriggerDodgeAttack =
         isDashing
@@ -536,6 +622,22 @@ void Player::Update(float cameraYaw)
         && !attack_.IsAttacking()
         && comboStep_ == 0
         && !isJumping_;
+
+    // 回避中に攻撃を押した場合も回避攻撃を出す
+    const bool shouldTriggerDodgeAttackDuringDodge =
+        isDodging_
+        && canDodgeAttack_
+        && attackPressed;
+
+    // バッファされた回避攻撃を回避終了後に発動する
+    const bool shouldTriggerBufferedDodgeAttack =
+        queuedDodgeAttack_
+        && canDodgeAttack_
+        && !isDodging_
+        && !attack_.IsAttacking()
+        && comboStep_ == 0
+        && isGrounded_
+        && attackRecoveryTimer_ <= 0.0f;
 
     // 長押しエリアル始動攻撃（1段目のみ）
     const bool canStartAerialStarter =
@@ -581,10 +683,25 @@ void Player::Update(float cameraYaw)
         }
 
         attack_.ExecuteStrongAttack();
+        playerAnimation_.PlayDashAttack();
+    }
+    else if (shouldTriggerDodgeAttackDuringDodge || shouldTriggerBufferedDodgeAttack)
+    {
+        queuedDodgeAttack_ = false;
+        canDodgeAttack_ = false;
+        dodgeAttackGraceTimer_ = 0.0f;
+        pendingCombo_ = false;
+        comboStep_ = 0;
+        isAirAttackLocked_ = false;
+        pendingDodgeAttackRecovery_ = true;
+        isAerialStarterAttack_ = false;
+
+        // 回避中の向きをそのまま使って回避攻撃を出す
+        attack_.ExecuteDodgeAttack();
         playerAnimation_.PlayDodgeAttack();
     }
     else if (qPressed
-        && attackRecoveryTimer_ <= 0.0f
+        && attackRecoveryTimer_ <= 0
         && !isDodging_
         && !attack_.IsAttacking()
         && comboStep_ == 0
@@ -675,8 +792,8 @@ void Player::Update(float cameraYaw)
     if (ctrlPressed && !isDodging_ && !attack_.IsAttacking() && comboStep_ == 0 && isGrounded_ && attackRecoveryTimer_ <= 0.0f)
     {
         queuedDodgeAttack_ = false;
-        canDodgeAttack_ = false;
-        dodgeAttackGraceTimer_ = 0.0f;
+        canDodgeAttack_ = true;
+        dodgeAttackGraceTimer_ = kDodgeAttackGraceDuration;
 
         if (hasMoveKeyInput)
         {
@@ -931,6 +1048,9 @@ void Player::Draw() const
         DrawSphere3D(position_, 20.0f, 16, GetColor(220, 80, 80), GetColor(255, 255, 255), TRUE);
     }
 
+    // 攻撃判定を可視化する
+    DrawAttackHitboxes(position_, GetFacingDirection(), attack_.GetCurrentAttack(), comboStep_, attack_.GetAttackDuration());
+
     attack_.Draw();
 }
 
@@ -983,6 +1103,13 @@ bool Player::IsAttackHitboxActive() const
     {
         const float elapsed = attack_.GetAttackDuration();
         return elapsed >= kDashAttackHitStart && elapsed <= kDashAttackHitEnd;
+    }
+
+    // 回避攻撃もコンボ段を使わないため、経過時間で判定する
+    if (attack_.GetCurrentAttack() == AttackType::DodgeAttack && comboStep_ == 0)
+    {
+        const float elapsed = attack_.GetAttackDuration();
+        return elapsed >= 0.18f && elapsed <= 0.92f * kDashAttackSlowScale;
     }
 
     // コンボ段が無いときは判定無し

@@ -5,6 +5,7 @@ enum class AttackType
     WeakAttack,
     StrongAttack,
     PullAttack,
+    DodgeAttack,
     None
 };
 
@@ -21,6 +22,7 @@ public:
     void ExecuteWeakAttack();
     void ExecuteStrongAttack();
     void ExecutePullAttack();
+    void ExecuteDodgeAttack();
     void CancelAttack();
 
     AttackType GetCurrentAttack() const;

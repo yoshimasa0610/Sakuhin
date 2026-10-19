@@ -4,14 +4,14 @@
 #include "Enemy.h"
 #include "../Player/PlayerAttack.h"
 
-// 敵管理クラス（現在は1体のみ管理）
+// 敵管理クラス（現在は1体の敵を管理）
 class EnemyManager
 {
 public:
     // 初期化（モデル読み込み）
     void Initialize();
 
-    // 更新（敵更新 + プレイヤー攻撃との当たり判定）
+    // 更新（敵の行動更新 + プレイヤー攻撃との当たり判定）
     void Update(const VECTOR& playerPosition,
         const VECTOR& playerFacingDirection,
         AttackType playerAttackType,
@@ -21,19 +21,25 @@ public:
         bool isPlayerAerialStarterAttackActive,
         float playerAttackElapsedTime);
 
-    // 描画（敵本体 + 攻撃判定可視化）
+    // 描画（エネミー本体 + 攻撃判定の可視化）
     void Draw() const;
 
     // 終了処理
     void Finalize();
 
-    // エリアル始動ヒット時の追従ジャンプ要求を1回だけ取得
+    // エリアル始動ヒット後の追従ジャンプ要求を1回だけ取得
     bool ConsumeAerialFollowJumpRequest(float& outTargetY);
+
+    // ロックオン対象として使えるかどうか
+    bool HasLockOnTarget() const;
+
+    // ロックオン用の注視位置を取得する
+    VECTOR GetLockOnTargetPosition() const;
 
 private:
     Enemy enemy_;
 
-    // 攻撃ヒットの連続判定を抑えるクールタイム
+    // ヒット中の連続ヒットを防ぐためのクールタイム
     float hitCooldownTimer_ = 0.0f;
 
     // 1回の攻撃中に複数ヒットしないための状態
@@ -41,7 +47,7 @@ private:
     bool hitRegisteredThisAttack_ = false;
     int prevComboStep_ = 0;
 
-    // 攻撃判定の可視化情報（剣判定と前面補助判定）
+    // 攻撃判定の可視化用（現在は前方と剣の2つ）
     bool showAttackHitbox_ = false;
     VECTOR swordHitCenter_ = VGet(0.0f, 0.0f, 0.0f);
     float swordHitRadius_ = 0.0f;

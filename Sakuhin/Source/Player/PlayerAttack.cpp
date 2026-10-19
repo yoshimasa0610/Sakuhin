@@ -70,6 +70,13 @@ void Attack::ExecutePullAttack()
     attackDuration_ = 0.85f;
 }
 
+void Attack::ExecuteDodgeAttack()
+{
+    currentAttack_ = AttackType::DodgeAttack;
+    attackTimer_ = 0.0f;
+    attackDuration_ = 1.05f * kDashAttackSlowScale;
+}
+
 // UŒ‚ƒLƒƒƒ“ƒZƒ‹
 void Attack::CancelAttack()
 {

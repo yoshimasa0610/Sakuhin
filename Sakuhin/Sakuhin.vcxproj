@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -92,12 +92,12 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>"C:\DxLib_VC\プロジェクトに追加すべきファイル_VC用"</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>"C:\DxLib_VC\�v���W�F�N�g�ɒǉ����ׂ��t�@�C��_VC�p"</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>"C:\DxLib_VC\プロジェクトに追加すべきファイル_VC用"</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>"C:\DxLib_VC\�v���W�F�N�g�ɒǉ����ׂ��t�@�C��_VC�p"</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -122,17 +122,18 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>"C:\DxLib_VC\プロジェクトに追加すべきファイル_VC用"</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>"C:\DxLib_VC\�v���W�F�N�g�ɒǉ����ׂ��t�@�C��_VC�p"</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>"C:\DxLib_VC\プロジェクトに追加すべきファイル_VC用"</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>"C:\DxLib_VC\�v���W�F�N�g�ɒǉ����ׂ��t�@�C��_VC�p"</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Source\Camera\Camera.cpp" />
     <ClCompile Include="Source\Enemy\Enemy.cpp" />
+    <ClCompile Include="Source\Enemy\EnemyAnimation.cpp" />
     <ClCompile Include="Source\Enemy\EnemyManager.cpp" />
     <ClCompile Include="Source\Input\Input.cpp" />
     <ClCompile Include="Source\Main.cpp" />
@@ -146,6 +147,7 @@
   <ItemGroup>
     <ClInclude Include="Source\Camera\Camera.h" />
     <ClInclude Include="Source\Enemy\Enemy.h" />
+    <ClInclude Include="Source\Enemy\EnemyAnimation.h" />
     <ClInclude Include="Source\Enemy\EnemyManager.h" />
     <ClInclude Include="Source\GameSetting\GameSetting.h" />
     <ClInclude Include="Source\Input\Input.h" />

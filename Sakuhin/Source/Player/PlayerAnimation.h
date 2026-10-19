@@ -25,6 +25,9 @@ public:
     // 単発アクション再生（回避など）
     void PlayActionAnimation(int animIndex, float duration);
 
+    // ダッシュ攻撃再生
+    void PlayDashAttack();
+
     // 回避攻撃再生
     void PlayDodgeAttack();
 
@@ -78,6 +81,7 @@ private:
     int jumpAnimIndex_;
     int dodgeBackAnimIndex_;
     int dodgeForwardAnimIndex_;
+    int dashAttackAnimIndex_;
     int dodgeAttackAnimIndex_;
     int pullAttackAnimIndex_;
 };
